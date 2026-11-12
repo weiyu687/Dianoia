@@ -3,11 +3,11 @@ import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import {
   DocxEditorContent, DocxEditorContentControl, DocxEditorContextMenu, DocxEditorEquation,
   DocxEditorHyperLink, DocxEditorLoading, DocxEditorOpenFailure, DocxEditorRoot,
-  DocxEditorToolbar, DocxEditorViewport, LocaleProvider,
+  DocxEditorToolbar, DocxEditorViewport, ImageInsertTrigger, LocaleProvider,
 } from '@docx-editor.dev/vue'
 import { zhCN } from '@docx-editor.dev/i18n'
 import '@docx-editor.dev/vue/styles.css'
-import { ArrowLeft, Download, Eye, Save, Sparkles } from 'lucide-vue-next'
+import { ArrowLeft, Download, Eye, ImagePlus, Save, Sparkles } from 'lucide-vue-next'
 import { onBeforeRouteLeave, useRoute } from 'vue-router'
 import { api, download } from '../api'
 import PdfViewer from '../components/PdfViewer.vue'
@@ -288,6 +288,9 @@ function handleWritingKey(event) {
             <div class="word-toolbar"><DocxEditorToolbar /></div>
             <div class="word-actions">
               <div class="actions">
+                <ImageInsertTrigger as-child aria-label="插入图片">
+                  <button class="button subtle" type="button"><ImagePlus :size="16" /> 插入图片</button>
+                </ImageInsertTrigger>
                 <button class="button subtle" :disabled="!editable" @mousedown.prevent @click="openWriting('continue')"><Sparkles :size="16" /> AI 续写 <kbd>Alt+\</kbd></button>
                 <button class="button subtle" :disabled="!editable" @mousedown.prevent @click="openWriting('rewrite')">重写选区</button>
               </div>

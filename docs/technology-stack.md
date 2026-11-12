@@ -32,6 +32,8 @@
 
 中文字体和复杂对象可能影响分页。新增学校模板时可用原件对照在线编辑和 PDF 导出。[Vue 组合接口](https://www.docx-editor.dev/docs/2.x/vue/composition) · [DOCX 格式兼容](https://www.docx-editor.dev/docs/2.x/docx-fidelity) · [LibreOffice 转换格式](https://help.libreoffice.org/latest/en-US/text/shared/guide/convertfilters.html)
 
+教案的图片插入使用现有 Vue 适配器的 `ImageInsertTrigger`。编辑器校验 PNG、JPEG 和 GIF，并将图片嵌入 DOCX。保存、预览与导出使用同一教案文档。[图片插入与兼容格式](https://www.docx-editor.dev/docs/2.x/guides/images)
+
 ## 待验证和待选型
 
 - 资料向量检索的候选为 PostgreSQL + pgvector 与 Qwen3-Embedding。以真实中文课程样本比较证据召回、章节切分与引用页码后再确认。
