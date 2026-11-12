@@ -1,6 +1,6 @@
 # 智能教育平台架构设计
 
-状态为 v0.1 讨论稿，更新于 2026-11-11。
+状态为 v0.2，更新于 2026-11-12。已实现的工程范围见开发日志。
 
 ## 已确定的框架方向
 
@@ -17,7 +17,7 @@ FastAPI 提供 OpenAPI 接口描述，Deep Agents 支持传入自定义工具。
 ```mermaid
 flowchart LR
     TeacherPages["Vue 教师功能页"] --> BusinessAPI["FastAPI 业务接口"]
-    AdminPages["Vue 管理端"] --> BusinessAPI
+    AdminPages["独立 Vue 管理端"] --> BusinessAPI
     Chat["Vue 教师 Agent 对话"] --> AgentAPI["FastAPI 会话接口"]
     AgentAPI --> DeepAgents["Deep Agents"]
     DeepAgents --> Tools["教学工具"]
@@ -37,3 +37,12 @@ flowchart LR
 
 - 首个验证组件为教案生成。用同一课程和资料，从功能页和对话分别提交生成请求，验证权限、任务状态、草稿记录和编辑行为。
 - 后续按组件比较前端工程配套、数据库与对象存储、后台任务执行与重试、对话流式传输与会话持久化、模型与教学内容生成、数字人及语音方案。对比结论与验收样例按组件记录，确认后实施。
+
+## 首次开发实现
+
+- Vite 多入口构建。教师端入口是 `/`，学校管理端入口是 `/admin/`。教师 Agent 使用教师端独立全页路由。
+- FastAPI 提供同源 API。学校管理员和教师使用不同入口，后端校验账号角色、服务端会话、任课关系和资料或教案归属。
+- SQLAlchemy 支持 SQLite 本地验收和 PostgreSQL 部署配置。资料原件位于私有目录，数据库保存逐页正文、树形目录和教案版本号。编辑使用带预期版本号的更新防止覆盖。
+- 教案正文编辑采用 Tiptap。续写建议以光标处临时装饰呈现，通过 `Alt+\` 请求，`Tab` 采纳，`Esc` 取消。续写与重写调用独立的模型服务接口。
+- 原始 PDF 与教案 PDF 由 PDF.js 预览。旧 DOC 导出和 Office 版式预览依赖 LibreOffice。按学校 Word 模板进行原版式编辑和填充需验收 ONLYOFFICE 后接入。
+- Agent 在当前课程范围内读取资料列表、目录、页码正文和已有教案。Skill 指导工具选择和引用。向量召回及 Agent 保存能力待后续实现。

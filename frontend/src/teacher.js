@@ -1,0 +1,24 @@
+import './compat'
+import { createApp } from 'vue'
+import { createRouter, createWebHashHistory } from 'vue-router'
+import { applyTheme } from './session'
+import Teacher from './Teacher.vue'
+import Home from './views/Home.vue'
+import Library from './views/Library.vue'
+import Lessons from './views/Lessons.vue'
+import './style.css'
+
+applyTheme()
+const router = createRouter({
+  history: createWebHashHistory(),
+  routes: [
+    { path: '/', name: 'home', component: Home },
+    { path: '/resources', name: 'library', component: Library },
+    { path: '/resources/:id', name: 'resource', component: () => import('./views/Resource.vue') },
+    { path: '/lessons', name: 'lessons', component: Lessons },
+    { path: '/lessons/:id', name: 'lesson', component: () => import('./views/LessonEditor.vue') },
+    { path: '/agent', name: 'agent', component: () => import('./views/Agent.vue') },
+    { path: '/:pathMatch(.*)*', redirect: '/' },
+  ],
+})
+createApp(Teacher).use(router).mount('#app')
