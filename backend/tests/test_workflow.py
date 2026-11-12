@@ -87,6 +87,7 @@ class WorkflowTest(unittest.TestCase):
                 canvas.showPage()
                 canvas.bookmarkPage("second")
                 canvas.addOutlineEntry("Isolation", "second", level=1)
+                canvas.addOutlineEntry("Next chapter", "second")
                 canvas.drawString(40, 500, "Repeatable read is an isolation level.")
                 canvas.save()
                 self.check_word_preview(client, teacher, course, file.getvalue(), engine, FILES, Resource, identifier)
@@ -94,9 +95,23 @@ class WorkflowTest(unittest.TestCase):
                     "file": ("transactions.pdf", file.getvalue(), "application/pdf"),
                 }).raise_for_status().json()
                 self.assertEqual(resource["outline"][0]["children"][0]["start"], 2)
-                client.patch(f"/api/resources/{resource['id']}", json={
-                    "title": "事务讲义", "outline": resource["outline"], "status": "ready",
-                }).raise_for_status()
+                self.assertEqual(resource["outline"][0]["end"], 2)
+                self.assertEqual(resource["outline"][1]["start"], 2)
+                resource_path = f"/api/resources/{resource['id']}"
+                stale_outline = resource["outline"]
+                stale_outline[0]["end"] = 1
+                invalid = client.patch(resource_path, json={
+                    "title": "事务讲义", "outline": stale_outline, "status": "ready",
+                })
+                self.assertEqual(invalid.status_code, 422)
+                with Session(engine) as db:
+                    db.get(Resource, resource["id"]).outline = stale_outline
+                    db.commit()
+                self.assertEqual(client.get(resource_path).json()["outline"][0]["end"], 2)
+                saved = client.patch(resource_path, json={
+                    "title": "事务讲义", "outline": stale_outline, "status": "ready",
+                }).raise_for_status().json()
+                self.assertEqual(saved["outline"][0]["end"], 2)
                 client.get(f"/api/resources/{resource['id']}/preview").raise_for_status()
                 plan = client.post("/api/lessons", json={
                     "course_id": course, "title": "事务教案",

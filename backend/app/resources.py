@@ -1,3 +1,4 @@
+from copy import deepcopy
 from pathlib import Path
 from typing import Annotated
 from zipfile import BadZipFile
@@ -11,7 +12,7 @@ from pypdf.errors import PdfReadError
 from sqlalchemy import select
 
 from .auth import DB, Teacher, course_access
-from .documents import EXTENSIONS, FILES, WORD_EXTENSIONS, OfficeUnavailable, inspect_resource
+from .documents import EXTENSIONS, FILES, WORD_EXTENSIONS, OfficeUnavailable, include_child_pages, inspect_resource
 from .models import Resource, identifier
 
 router = APIRouter(prefix="/api/resources", tags=["resources"])
@@ -36,7 +37,10 @@ def resource_view(row, detail=False):
         "id", "title", "filename", "course_id", "extension", "size", "page_count", "has_preview", "status", "created_at", "updated_at"
     )}
     if detail:
-        result.update(outline=row.outline, has_text=any(row.pages), text_pages=[bool(page) for page in row.pages])
+        result.update(
+            outline=include_child_pages(deepcopy(row.outline)),
+            has_text=any(row.pages), text_pages=[bool(page) for page in row.pages],
+        )
     return result
 
 
@@ -171,8 +175,12 @@ def update_resource(resource_id: str, data: ResourceUpdate, db: DB, user: Teache
     if not data.title.strip():
         raise HTTPException(422, "资料名称不能为空")
     if data.outline is not None:
-        validate_outline(data.outline, 1, row.page_count)
-        row.outline = [node.model_dump() for node in data.outline]
+        outline = [node.model_dump() for node in data.outline]
+        if outline == row.outline:
+            # A page can contain both the end of a subsection and the next heading.
+            include_child_pages(outline)
+        validate_outline([OutlineNode.model_validate(node) for node in outline], 1, row.page_count)
+        row.outline = outline
     if data.status == "ready":
         if row.extension in WORD_EXTENSIONS and not row.has_preview:
             raise HTTPException(409, "请先将 Word 资料转换为 PDF")

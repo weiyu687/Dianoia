@@ -54,6 +54,15 @@ def convert_with_office(source, format_spec, output_dir):
     return result if result.exists() else None
 
 
+def include_child_pages(nodes):
+    for node in nodes:
+        children = node["children"]
+        include_child_pages(children)
+        if children:
+            node["end"] = max(node["end"], max(child["end"] for child in children))
+    return nodes
+
+
 def candidate_outline(nodes, page_count):
     def visit(siblings, limit):
         for index, node in enumerate(siblings):
@@ -61,7 +70,7 @@ def candidate_outline(nodes, page_count):
             node["end"] = max(node["start"], min(limit, following - 1))
             visit(node["children"], node["end"])
     visit(nodes, page_count)
-    return nodes
+    return include_child_pages(nodes)
 
 
 def numbered_outline(headings, page_count):
