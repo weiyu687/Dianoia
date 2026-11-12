@@ -8,6 +8,7 @@ from typing import Annotated, Literal
 from urllib.parse import quote
 
 from docx import Document
+from docx.oxml.ns import qn
 from docx.table import Table
 from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field, StringConstraints
@@ -20,6 +21,7 @@ from sqlalchemy import select, update
 
 from .auth import DB, Teacher, course_access
 from .documents import WORD_EXTENSIONS
+from .lesson_content import lesson_blocks
 from .lesson_templates import owned_template
 from .models import Lesson, LessonDocument, identifier, now
 from .resources import owned_resource
@@ -142,7 +144,7 @@ def new_lesson(data: NewLesson, db: DB, user: Teacher):
         content = owned_template(db, user, data.template_id).content
         return create_lesson(db, user, data, document_sections(Document(BytesIO(content))), content)
     if data.blank_document:
-        document = Document()
+        document = chinese_lesson_document()
         document.add_paragraph()
         return create_lesson(db, user, data, document_sections(document), serialize_docx(document))
     return create_lesson(db, user, data, default_sections())
@@ -232,13 +234,28 @@ def render_docx(row):
 
 
 def render_sections_docx(title, sections):
-    document = Document()
+    document = chinese_lesson_document()
     document.add_heading(title, 0)
     for section, depth in walk_sections(sections):
         document.add_heading(section["title"], level=min(depth, 9))
-        for line in section["content"].splitlines():
-            document.add_paragraph(line)
+        for block in lesson_blocks(section["content"]):
+            if block["type"] == "paragraph":
+                document.add_paragraph(block["text"])
+                continue
+            rows = [block["header"], *block["rows"]]
+            table = document.add_table(rows=len(rows), cols=len(rows[0]))
+            table.style = "Table Grid"
+            for index, values in enumerate(rows):
+                for cell, value in zip(table.rows[index].cells, values):
+                    cell.text = value
     return serialize_docx(document)
+
+
+def chinese_lesson_document():
+    document = Document()
+    fonts = document.styles["Normal"].element.get_or_add_rPr().get_or_add_rFonts()
+    fonts.set(qn("w:eastAsia"), "宋体")
+    return document
 
 
 def serialize_docx(document):

@@ -44,5 +44,5 @@ flowchart LR
 - FastAPI 提供同源 API。学校管理员和教师使用不同入口，后端校验账号角色、服务端会话、任课关系和资料或教案归属。
 - SQLAlchemy 支持 SQLite 本地验收和 PostgreSQL 部署配置。资料原件位于私有目录，数据库保存逐页正文、树形目录和教案版本号。编辑使用带预期版本号的更新防止覆盖。
 - 教案使用 DOCX Editor 进行分页编辑，已有结构化教案通过生成 DOCX 打开。Word 模板与实例独立保存。文本索引用于教师 Agent 查询，DOCX 为编辑和导出的正文版本。续写与重写调用独立的模型服务接口。
-- 原始 PDF 与教案 PDF 由 PDF.js 预览。旧 DOC 转换与导出、Word 模板预览及新版教案 PDF 导出依赖 LibreOffice。
+- 资料、教案和 Word 模板使用同一 PDF.js 连续滚动预览。旧 DOC 转换与导出、Word 模板预览及新版教案 PDF 导出依赖 LibreOffice。
 - Agent 在当前课程范围内读取资料列表、目录、页码正文和已有教案。Skill 指导工具选择和引用。向量召回及 Agent 保存能力待后续实现。

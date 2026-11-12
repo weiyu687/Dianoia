@@ -12,7 +12,7 @@
 | 数据 | SQLAlchemy 2、SQLite、PostgreSQL 配置与 psycopg 3 | SQLite 用于本地验收。PostgreSQL 可通过环境配置接入，实际部署与迁移待验收。当前业务表在启动时创建。 |
 | 虚拟数据导入 | openpyxl | XLSX 预检、导入和工号、学号及关联关系校验。 |
 | 资料处理 | python-multipart、LibreOffice Writer/Impress、pypdf、python-pptx | Word 先转 PDF，再读书签和逐页正文。文本层 PDF 直接处理。PPTX 可提取原生文本并用 LibreOffice 生成 PDF 预览。资料原件保存在私有目录。 |
-| PDF 查看 | PDF.js 5.4.624 | 资料和教案预览使用同一前端查看器。 |
+| PDF 查看 | PDF.js 5.4.624 | 资料、教案和模板共用原生 `PDFViewer`，支持连续滚动、按页渲染、页码同步和直接跳页。 |
 | 教案文档 | `@docx-editor.dev/vue`、`core` 和 `i18n` 2.37.0，python-docx，LibreOffice | 分页在线编辑 DOCX，模板与教案副本在数据库存储。旧版 DOC 输入转为 DOCX，PDF 和 DOC 输出从当前文档版本转换。 |
 | 旧教案兼容 | python-docx、ReportLab | 原有结构化教案可转换为 DOCX 打开。已有 PDF 导出在旧数据仍使用 ReportLab，首次在分页编辑器保存后使用 DOCX 转换。 |
 | 教案生成与写作 | HTTPX、兼容 OpenAI Chat Completions 的配置端点 | 按指定资料页码生成草稿，支持编辑器内续写与重写。提供方与模型从环境配置读取。 |
@@ -33,6 +33,8 @@
 中文字体和复杂对象可能影响分页。新增学校模板时可用原件对照在线编辑和 PDF 导出。[Vue 组合接口](https://www.docx-editor.dev/docs/2.x/vue/composition) · [DOCX 格式兼容](https://www.docx-editor.dev/docs/2.x/docx-fidelity) · [LibreOffice 转换格式](https://help.libreoffice.org/latest/en-US/text/shared/guide/convertfilters.html)
 
 教案使用 Vue 适配器原生的 `DocxEditorToolbar.ImageInsert`，随格式工具栏适配屏幕宽度。编辑器校验 PNG、JPEG 和 GIF，并将图片嵌入 DOCX。保存、预览与导出使用同一教案文档。[图片插入与兼容格式](https://www.docx-editor.dev/docs/2.x/guides/images) · [原生工具栏](https://www.docx-editor.dev/docs/2.x/guides/toolbar)
+
+教案使用 `TableInsert` 插入原生表格。模型返回的 Markdown 管道表格由后端解析为段落和表格，整篇生成由 python-docx 写入，光标建议采纳时由 DOCX Editor 通过富文本粘贴写入。候选在编辑器画布内定位显示，未采纳的内容不进入文档。中文字体目录通过 `supportedFamilies` 配置，HarfBuzz WASM 随应用提供。预览与导出分别依赖客户端与转换服务器可用的字体。[表格和工具栏插槽](https://www.docx-editor.dev/docs/2.x/guides/chrome-slots#images-and-tables) · [字体配置](https://www.docx-editor.dev/docs/2.x/guides/fonts)
 
 ## 待验证和待选型
 

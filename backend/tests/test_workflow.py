@@ -147,6 +147,7 @@ class WorkflowTest(unittest.TestCase):
                         "before": "教学对象", "after": "",
                     }).raise_for_status().json()
                     self.assertEqual(suggestion["text"], "安排并发实验。")
+                    self.assertEqual(suggestion["blocks"], [{"type": "paragraph", "text": "安排并发实验。"}])
                     self.assertIn("教学对象", model.call_args.args[1])
                     self.assertEqual(client.get(route).json()["revision"], 2)
 
@@ -195,7 +196,9 @@ class WorkflowTest(unittest.TestCase):
         def fill_generated_sections(_, prompt, structured):
             self.assertTrue(structured)
             expected = json.loads(prompt)["预期 JSON"]
-            expected["sections"][0]["content"] = "模型生成的教学内容"
+            expected["sections"][0]["content"] = (
+                "模型生成的教学内容\n| 教学环节 | 示例 |\n| --- | --- |\n| 练习 | A\\|B |"
+            )
             return json.dumps(expected, ensure_ascii=False)
 
         with patch("app.ai.generate", side_effect=fill_generated_sections):
@@ -205,6 +208,14 @@ class WorkflowTest(unittest.TestCase):
         generated_path = f"/api/lessons/{generated['id']}/document"
         generated_doc = Document(BytesIO(client.get(generated_path).raise_for_status().content))
         self.assertIn("模型生成的教学内容", [paragraph.text for paragraph in generated_doc.paragraphs])
+        self.assertEqual(generated_doc.tables[0].cell(1, 1).text, "A|B")
+        with patch("app.ai.generate", return_value="| 环节 | 内容 |\n| --- | --- |\n| 练习 | A |"):
+            suggestion = client.post("/api/ai/writing", json={
+                "lesson_id": generated["id"], "section": "正文", "mode": "continue",
+            }).raise_for_status().json()
+        self.assertEqual(suggestion["blocks"], [
+            {"type": "table", "header": ["环节", "内容"], "rows": [["练习", "A"]]},
+        ])
         plan = client.post("/api/lessons", json={
             "course_id": course, "title": "模板教案", "template_id": template["id"],
         }).raise_for_status().json()

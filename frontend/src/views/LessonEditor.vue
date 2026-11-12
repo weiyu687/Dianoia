@@ -1,17 +1,22 @@
 <script setup>
-import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import {
   DocxEditorContent, DocxEditorContentControl, DocxEditorContextMenu, DocxEditorEquation,
   DocxEditorHyperLink, DocxEditorLoading, DocxEditorOpenFailure, DocxEditorRoot,
   DocxEditorToolbar, DocxEditorViewport, LocaleProvider,
 } from '@docx-editor.dev/vue'
 import { zhCN } from '@docx-editor.dev/i18n'
+import { setHarfBuzzWasmUrl } from '@docx-editor.dev/core/layout'
+import harfBuzzWasm from '@docx-editor.dev/core/harfbuzz.wasm?url'
 import '@docx-editor.dev/vue/styles.css'
-import { ArrowLeft, Download, Eye, Save, Sparkles } from 'lucide-vue-next'
+import { ArrowLeft, Download, Eye, Save } from 'lucide-vue-next'
 import { onBeforeRouteLeave, useRoute } from 'vue-router'
 import { api, download } from '../api'
 import PdfViewer from '../components/PdfViewer.vue'
 import { theme } from '../session'
+import { useLessonWriting, writingOptions } from '../lessonWriting'
+
+setHarfBuzzWasmUrl(harfBuzzWasm)
 
 const id = String(useRoute().params.id)
 const lesson = ref(null)
@@ -28,15 +33,13 @@ const previewPage = ref(1)
 const page = ref(1)
 const totalPages = ref(0)
 const pageInput = ref(null)
-const mode = ref('')
-const instruction = ref('')
-const instructionInput = ref(null)
-const writing = ref(false)
-const suggestion = ref('')
+const canvas = ref(null)
+const chineseFonts = { supportedFamilies: [
+  '宋体', '黑体', '仿宋', '楷体', '微软雅黑', '等线', '华文中宋', '华文楷体', '思源宋体', '思源黑体',
+] }
+const writing = useLessonWriting({ editor, canvas, id, title: () => lesson.value.title, notice })
+const { mode, action, instruction, instructionInput, suggestion, busy: writingBusy, error: writingError, anchor } = writing
 let editVersion = 0
-let writingVersion = 0
-let writingDocumentRevision = null
-let selectionPin = null
 let unsubscribe = null
 
 onMounted(async () => {
@@ -54,7 +57,10 @@ function editorReady(instance) {
   editor.value = instance
   editable.value = instance.snapshot().editable
   unsubscribe?.()
-  unsubscribe = instance.on('selectionChange', updatePage)
+  unsubscribe = instance.on('selectionChange', () => {
+    updatePage()
+    writing.scheduleSelection()
+  })
   updatePage()
 }
 
@@ -82,7 +88,6 @@ function preventUnload(event) {
 }
 onBeforeRouteLeave(() => !changed.value || window.confirm('当前有未保存的教案修改，确定离开？'))
 onBeforeUnmount(() => {
-  clearWriting()
   unsubscribe?.()
   window.removeEventListener('beforeunload', preventUnload)
 })
@@ -96,7 +101,7 @@ function documentChanged(change) {
   if (change.source === 'load') return
   markChanged()
   updatePage()
-  if (writingDocumentRevision !== null && change.revision > writingDocumentRevision) clearWriting()
+  writing.documentChanged(change)
 }
 
 async function save() {
@@ -132,7 +137,7 @@ async function save() {
 async function showPreview() {
   if (preview.value) { preview.value = false; return }
   if (await save()) {
-    clearWriting()
+    writing.clear()
     previewPage.value = 1
     preview.value = true
   }
@@ -145,121 +150,6 @@ async function exportFile(format, event) {
   } catch (failure) { error.value = failure.message }
 }
 
-function clearWriting(restoreFocus = false) {
-  writingVersion += 1
-  writing.value = false
-  suggestion.value = ''
-  mode.value = ''
-  writingDocumentRevision = null
-  if (restoreFocus) editor.value?.focus()
-  if (selectionPin) editor.value?.releaseSelection(selectionPin)
-  selectionPin = null
-}
-
-async function openWriting(type) {
-  clearWriting()
-  notice.value = ''
-  error.value = ''
-  const snapshot = editor.value?.snapshot()
-  if (!snapshot?.editable || !snapshot.selection) {
-    notice.value = '请先在正文中定位光标或选择文字'
-    return
-  }
-  if (type === 'continue' && !snapshot.selectionCollapsed) {
-    notice.value = '请把光标放到要续写的位置'
-    return
-  }
-  if (type === 'rewrite' && snapshot.selectionCollapsed) {
-    notice.value = '请先选中要重写的文字'
-    return
-  }
-  selectionPin = editor.value.retainSelection()
-  mode.value = type
-  instruction.value = ''
-  await nextTick()
-  instructionInput.value?.focus()
-}
-
-function writingContext(instance, type) {
-  if (type === 'rewrite') return { before: instance.query({ type: 'selectedText' }), after: '' }
-  const { to } = instance.snapshot().selection
-  const paragraphs = instance.query({ type: 'paragraphs', container: to.container })
-  const position = paragraphs.findIndex((item) => item.paraId && item.paraId === to.paraId)
-  if (position < 0) {
-    return { before: paragraphs.slice(0, 24).map((item) => item.text).join('\n').slice(0, 14000), after: '' }
-  }
-  const context = (items) => items.map((item) => item.text).join('\n')
-  return {
-    before: context(paragraphs.slice(Math.max(0, position - 18), position + 1)).slice(-14000),
-    after: context(paragraphs.slice(position + 1, position + 8)).slice(0, 14000),
-  }
-}
-
-async function requestWriting() {
-  if (writing.value || !mode.value) return
-  const type = mode.value
-  const version = ++writingVersion
-  const selection = writingContext(editor.value, type)
-  if (type === 'rewrite' && (!selection.before.trim() || selection.before.length > 14000)) {
-    error.value = '请选择 1 至 14000 字的正文'
-    return
-  }
-  writingDocumentRevision = editor.value.getDocumentHandle().revision
-  writing.value = true
-  suggestion.value = ''
-  error.value = ''
-  try {
-    const result = await api('/ai/writing', { method: 'POST', body: {
-      lesson_id: id, section: lesson.value.title, mode: type, instruction: instruction.value, ...selection,
-    } })
-    if (version !== writingVersion) return
-    suggestion.value = result.text
-    editor.value.focus()
-  } catch (failure) {
-    if (version === writingVersion) error.value = failure.message
-  } finally {
-    if (version === writingVersion) writing.value = false
-  }
-}
-
-function applySuggestion() {
-  if (!suggestion.value) return
-  if (editor.value.getDocumentHandle().revision !== writingDocumentRevision) {
-    clearWriting()
-    notice.value = '正文已变化，请重新生成'
-    return
-  }
-  const text = suggestion.value
-  const type = mode.value
-  editor.value.focus()
-  const result = editor.value.exec({ type: 'pasteWithoutFormatting', text })
-  clearWriting()
-  if (!result.ok) {
-    error.value = '无法在当前位置写入，请选择可编辑的正文'
-    return
-  }
-  notice.value = type === 'rewrite' ? '已应用重写' : '已采纳续写'
-}
-
-function handleWritingKey(event) {
-  if (event.isComposing || event.keyCode === 229) return
-  const inDocument = event.target.closest('.word-canvas')
-  if (inDocument && event.altKey && event.code === 'Backslash' && !event.ctrlKey && !event.metaKey && !event.repeat) {
-    event.preventDefault()
-    event.stopPropagation()
-    openWriting('continue')
-  } else if (event.key === 'Escape' && mode.value) {
-    event.preventDefault()
-    event.stopPropagation()
-    clearWriting(true)
-  } else if (inDocument && event.key === 'Tab' && !event.shiftKey && suggestion.value) {
-    event.preventDefault()
-    event.stopPropagation()
-    applySuggestion()
-  } else if (inDocument && mode.value && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) {
-    clearWriting()
-  }
-}
 </script>
 
 <template>
@@ -282,37 +172,25 @@ function handleWritingKey(event) {
         </div>
       </header>
       <PdfViewer v-if="preview" :src="`/api/lessons/${id}/export/pdf?inline=true&v=${lesson.revision}`" v-model:page="previewPage" />
-      <section v-show="!preview" class="word-editor" aria-label="Word 教案编辑器" @keydown.capture="handleWritingKey">
+      <section v-show="!preview" class="word-editor" aria-label="Word 教案编辑器" @keydown.capture="writing.keydown">
         <LocaleProvider :i18n="zhCN">
-          <DocxEditorRoot :document="documentBytes" locale="zh-CN" :color-mode="theme" @ready="editorReady" @change="documentChanged">
+          <DocxEditorRoot :document="documentBytes" locale="zh-CN" :color-mode="theme" :fonts="chineseFonts" @ready="editorReady" @change="documentChanged">
             <div class="word-toolbar">
               <DocxEditorToolbar>
                 <DocxEditorToolbar.Group id="insert" label="插入" after="text" :priority="75">
                   <DocxEditorToolbar.ImageInsert />
+                  <DocxEditorToolbar.TableInsert />
                 </DocxEditorToolbar.Group>
               </DocxEditorToolbar>
             </div>
             <div class="word-actions">
-              <div class="actions">
-                <button class="button subtle" :disabled="!editable" @mousedown.prevent @click="openWriting('continue')"><Sparkles :size="16" /> AI 续写 <kbd>Alt+\</kbd></button>
-                <button class="button subtle" :disabled="!editable" @mousedown.prevent @click="openWriting('rewrite')">重写选区</button>
-              </div>
               <form v-if="totalPages" class="word-page-number" @submit.prevent="jumpPage">
                 <label>页 <input ref="pageInput" :value="page" aria-label="跳转到教案页码" type="number" min="1" :max="totalPages" @change="jumpPage"></label>
                 <span>/ {{ totalPages }}</span>
               </form>
             </div>
             <p v-if="notice" class="word-notice" role="status">{{ notice }}</p>
-            <form v-if="mode" class="writing-panel stack" @submit.prevent="requestWriting">
-              <label>{{ mode === 'rewrite' ? '重写要求' : '续写要求' }}<input ref="instructionInput" v-model="instruction" maxlength="2000" placeholder="可输入对本次生成的要求"></label>
-              <p v-if="suggestion" class="rewrite-result" aria-live="polite">{{ suggestion }}</p>
-              <div class="actions">
-                <button v-if="suggestion" class="button primary" type="button" @mousedown.prevent @click="applySuggestion">采纳 <kbd>Tab</kbd></button>
-                <button v-else class="button primary" type="submit" :disabled="writing">{{ writing ? '正在生成' : '生成建议' }}</button>
-                <button class="button subtle" type="button" @click="clearWriting(true)">取消 <kbd>Esc</kbd></button>
-              </div>
-            </form>
-            <div class="word-canvas" @pointerdown.capture="mode && clearWriting()" @scroll.capture="updatePage">
+            <div ref="canvas" class="word-canvas" @pointerdown.capture="writing.pointerDown" @scroll.capture="updatePage(); writing.position()">
               <DocxEditorViewport class="word-viewport">
                 <DocxEditorContent />
                 <DocxEditorHyperLink />
@@ -321,6 +199,37 @@ function handleWritingKey(event) {
                 <DocxEditorContentControl />
               </DocxEditorViewport>
               <DocxEditorLoading overlay />
+              <div v-if="mode && anchor" class="lesson-writing" :style="anchor" aria-label="光标处 AI 写作">
+                <div v-if="suggestion" class="writing-suggestion" aria-live="polite">
+                  <div class="writing-draft">
+                    <template v-if="suggestion.blocks?.some(block => block.type === 'table')">
+                      <template v-for="(block, index) in suggestion.blocks" :key="index">
+                        <table v-if="block.type === 'table'">
+                          <thead><tr><th v-for="(cell, col) in block.header" :key="col">{{ cell }}</th></tr></thead>
+                          <tbody><tr v-for="(row, number) in block.rows" :key="number"><td v-for="(cell, col) in row" :key="col">{{ cell }}</td></tr></tbody>
+                        </table>
+                        <p v-else>{{ block.text }}</p>
+                      </template>
+                    </template>
+                    <p v-else>{{ suggestion.text }}</p>
+                  </div>
+                  <div class="writing-controls">
+                    <button class="button subtle" type="button" @mousedown.prevent @click="writing.apply">采纳 <kbd>Tab</kbd></button>
+                    <button class="button subtle" type="button" @mousedown.prevent @click="writing.clear(true)">取消 <kbd>Esc</kbd></button>
+                  </div>
+                </div>
+                <form v-else-if="action" class="writing-form" @submit.prevent="writing.generate">
+                  <label>{{ action[0] }}<input ref="instructionInput" v-model="instruction" :required="action[0] === '按要求写'" maxlength="1900" placeholder="输入要求"></label>
+                  <p v-if="writingError" class="error" role="alert">{{ writingError }}</p>
+                  <div class="writing-controls">
+                    <button class="button primary" type="submit" :disabled="writingBusy">{{ writingBusy ? '正在生成' : '生成' }}</button>
+                    <button class="button subtle" type="button" @click="writing.clear(true)">取消</button>
+                  </div>
+                </form>
+                <div v-else class="writing-options" aria-label="AI 写作选项">
+                  <button v-for="option in writingOptions[mode]" :key="option[0]" class="button subtle" type="button" @mousedown.prevent @click="writing.choose(option)">{{ option[0] }}</button>
+                </div>
+              </div>
             </div>
             <DocxEditorOpenFailure />
           </DocxEditorRoot>

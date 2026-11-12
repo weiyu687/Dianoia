@@ -9,6 +9,7 @@ import PdfViewer from '../components/PdfViewer.vue'
 const id = String(useRoute().params.id)
 const row = ref(null)
 const page = ref(1)
+const pdf = ref(null)
 const title = ref('')
 const nodes = ref([])
 const editing = ref(false)
@@ -29,6 +30,11 @@ async function getText() {
   } catch (failure) { error.value = failure.message }
 }
 watch(page, getText)
+
+function jump(number) {
+  if (pdf.value && number === page.value) pdf.value.jump(number)
+  else page.value = number
+}
 
 onMounted(async () => {
   try {
@@ -88,14 +94,14 @@ async function original() {
           <div class="section-heading"><h2 id="resource-outline-heading">章节目录</h2><button v-if="row.page_count" type="button" class="button subtle" @click="editing = !editing">{{ editing ? '收起编辑' : '校对目录' }}</button></div>
           <p v-if="!nodes.length" class="muted">{{ needsWordPreview ? '转换为 PDF 后可校对目录。' : '暂无目录。可以手动添加章节。' }}</p>
           <div v-else class="resource-outline-scroll" role="region" aria-labelledby="resource-outline-heading" tabindex="0">
-            <ResourceOutline :nodes="nodes" :editing="editing" :max="row.page_count" @jump="page = $event" />
+            <ResourceOutline :nodes="nodes" :editing="editing" :max="row.page_count" @jump="jump" />
           </div>
           <button v-if="editing" class="button secondary" type="button" @click="nodes.push({ title: '', start: nodes.at(-1)?.end || 1, end: row.page_count, children: [] })"><Plus :size="16" /> 添加章节</button>
           <button class="button secondary" type="submit" :disabled="saving || converting"><Save :size="16" /> 保存资料</button>
           <button v-if="row.status !== 'ready' && row.has_text && !needsWordPreview" class="button primary" type="submit" value="ready" :disabled="saving">确认并入库</button>
           <p v-if="!row.has_text && !needsWordPreview" class="muted">没有可用正文。扫描页需要带文本层的文件。</p>
         </form>
-        <PdfViewer v-if="row.has_preview" :src="`/api/resources/${id}/preview`" v-model:page="page" />
+        <PdfViewer v-if="row.has_preview" ref="pdf" :src="`/api/resources/${id}/preview`" v-model:page="page" />
         <div v-else-if="needsWordPreview" class="panel text-preview stack">
           <div class="section-heading"><h2><FileText :size="18" /> PDF 预览</h2></div>
           <p v-if="converting" class="muted" role="status">正在将原始 Word 文件转换为 PDF…</p>
