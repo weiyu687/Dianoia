@@ -63,6 +63,17 @@ def include_child_pages(nodes):
     return nodes
 
 
+def named_outline(nodes):
+    result = []
+    for node in nodes:
+        children = named_outline(node["children"])
+        if node["title"].strip():
+            result.append({**node, "children": children})
+        else:
+            result.extend(children)
+    return result
+
+
 def candidate_outline(nodes, page_count):
     def visit(siblings, limit):
         for index, node in enumerate(siblings):
@@ -71,6 +82,13 @@ def candidate_outline(nodes, page_count):
             visit(node["children"], node["end"])
     visit(nodes, page_count)
     return include_child_pages(nodes)
+
+
+def restore_saved_outline(nodes, page_count):
+    named = named_outline(nodes)
+    if named != nodes:
+        return candidate_outline(named, page_count)
+    return include_child_pages(named)
 
 
 def numbered_outline(headings, page_count):
@@ -100,17 +118,23 @@ def pdf_data(source):
         nodes = []
         if depth >= 8:
             return nodes
+        previous = None
         for item in items:
             if isinstance(item, list):
-                if nodes:
-                    nodes[-1]["children"] = read_bookmarks(item, depth + 1)
+                children = read_bookmarks(item, depth + 1)
+                if previous is None:
+                    nodes.extend(children)
+                else:
+                    previous["children"] = children
                 continue
             page_index = reader.get_destination_page_number(item)
+            previous = None
             if isinstance(page_index, int) and 0 <= page_index < page_count:
-                nodes.append({"title": item.title[:160], "start": page_index + 1, "children": []})
+                previous = {"title": (item.title or "").strip()[:160], "start": page_index + 1, "children": []}
+                nodes.append(previous)
         return nodes
 
-    nodes = read_bookmarks(reader.outline)
+    nodes = named_outline(read_bookmarks(reader.outline))
     if not nodes:
         headings = []
         for index, text in enumerate(pages, start=1):

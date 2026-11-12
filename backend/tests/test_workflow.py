@@ -85,9 +85,14 @@ class WorkflowTest(unittest.TestCase):
                 canvas.addOutlineEntry("Transactions", "first")
                 canvas.drawString(40, 500, "Transactions have clear boundaries.")
                 canvas.showPage()
-                canvas.bookmarkPage("second")
-                canvas.addOutlineEntry("Isolation", "second", level=1)
-                canvas.addOutlineEntry("Next chapter", "second")
+                canvas.bookmarkPage("isolation")
+                canvas.addOutlineEntry("Isolation", "isolation", level=1)
+                canvas.bookmarkPage("unnamed")
+                canvas.addOutlineEntry("", "unnamed", level=1)
+                canvas.bookmarkPage("example")
+                canvas.addOutlineEntry("Shared example", "example", level=2)
+                canvas.bookmarkPage("next")
+                canvas.addOutlineEntry("Next chapter", "next")
                 canvas.drawString(40, 500, "Repeatable read is an isolation level.")
                 canvas.save()
                 self.check_word_preview(client, teacher, course, file.getvalue(), engine, FILES, Resource, identifier)
@@ -95,6 +100,7 @@ class WorkflowTest(unittest.TestCase):
                     "file": ("transactions.pdf", file.getvalue(), "application/pdf"),
                 }).raise_for_status().json()
                 self.assertEqual(resource["outline"][0]["children"][0]["start"], 2)
+                self.assertEqual([node["title"] for node in resource["outline"][0]["children"]], ["Isolation", "Shared example"])
                 self.assertEqual(resource["outline"][0]["end"], 2)
                 self.assertEqual(resource["outline"][1]["start"], 2)
                 resource_path = f"/api/resources/{resource['id']}"
@@ -104,6 +110,12 @@ class WorkflowTest(unittest.TestCase):
                     "title": "事务讲义", "outline": stale_outline, "status": "ready",
                 })
                 self.assertEqual(invalid.status_code, 422)
+                shared_example = stale_outline[0]["children"].pop()
+                stale_outline[0]["children"].append({"title": "", "start": 2, "end": 2, "children": [shared_example]})
+                stale_outline[0]["end"] = 2
+                blank = client.patch(resource_path, json={"title": "事务讲义", "outline": stale_outline})
+                self.assertEqual(blank.json()["detail"], "请填写所有章节名称")
+                stale_outline[0]["end"] = 1
                 with Session(engine) as db:
                     db.get(Resource, resource["id"]).outline = stale_outline
                     db.commit()
@@ -112,6 +124,7 @@ class WorkflowTest(unittest.TestCase):
                     "title": "事务讲义", "outline": stale_outline, "status": "ready",
                 }).raise_for_status().json()
                 self.assertEqual(saved["outline"][0]["end"], 2)
+                self.assertEqual(saved["outline"][0]["children"][1]["title"], "Shared example")
                 client.get(f"/api/resources/{resource['id']}/preview").raise_for_status()
                 plan = client.post("/api/lessons", json={
                     "course_id": course, "title": "事务教案",

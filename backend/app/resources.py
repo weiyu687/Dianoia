@@ -1,4 +1,3 @@
-from copy import deepcopy
 from pathlib import Path
 from typing import Annotated
 from zipfile import BadZipFile
@@ -12,7 +11,7 @@ from pypdf.errors import PdfReadError
 from sqlalchemy import select
 
 from .auth import DB, Teacher, course_access
-from .documents import EXTENSIONS, FILES, WORD_EXTENSIONS, OfficeUnavailable, include_child_pages, inspect_resource
+from .documents import EXTENSIONS, FILES, WORD_EXTENSIONS, OfficeUnavailable, inspect_resource, restore_saved_outline
 from .models import Resource, identifier
 
 router = APIRouter(prefix="/api/resources", tags=["resources"])
@@ -20,7 +19,7 @@ MAX_UPLOAD = 25 * 1024 * 1024
 
 
 class OutlineNode(BaseModel):
-    title: str = Field(min_length=1, max_length=160)
+    title: str = Field(max_length=160)
     start: int = Field(ge=1)
     end: int = Field(ge=1)
     children: list["OutlineNode"] = Field(default_factory=list, max_length=100)
@@ -38,7 +37,7 @@ def resource_view(row, detail=False):
     )}
     if detail:
         result.update(
-            outline=include_child_pages(deepcopy(row.outline)),
+            outline=restore_saved_outline(row.outline, row.page_count),
             has_text=any(row.pages), text_pages=[bool(page) for page in row.pages],
         )
     return result
@@ -163,7 +162,9 @@ def validate_outline(nodes, lower, upper, depth=1):
         raise HTTPException(422, "目录最多支持 8 层")
     prior_end = lower
     for node in nodes:
-        if not node.title.strip() or not lower <= node.start <= node.end <= upper or node.start < prior_end:
+        if not node.title.strip():
+            raise HTTPException(422, "请填写所有章节名称")
+        if not lower <= node.start <= node.end <= upper or node.start < prior_end:
             raise HTTPException(422, "请按页码排序，子章节页码必须在父章节范围内")
         prior_end = node.end
         validate_outline(node.children, node.start, node.end, depth + 1)
@@ -177,8 +178,7 @@ def update_resource(resource_id: str, data: ResourceUpdate, db: DB, user: Teache
     if data.outline is not None:
         outline = [node.model_dump() for node in data.outline]
         if outline == row.outline:
-            # A page can contain both the end of a subsection and the next heading.
-            include_child_pages(outline)
+            outline = restore_saved_outline(outline, row.page_count)
         validate_outline([OutlineNode.model_validate(node) for node in outline], 1, row.page_count)
         row.outline = outline
     if data.status == "ready":

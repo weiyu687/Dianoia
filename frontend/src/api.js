@@ -8,7 +8,11 @@ export async function api(path, options = {}) {
   const response = await fetch(`/api${path}`, { ...options, body, headers, credentials: 'same-origin' })
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}))
-    const message = typeof payload.detail === 'string' ? payload.detail : '请求失败，请检查输入后重试'
+    const issue = Array.isArray(payload.detail)
+      ? payload.detail.find((item) => typeof item?.msg === 'string')
+      : null
+    const message = typeof payload.detail === 'string' ? payload.detail
+      : issue?.msg || '请求失败，请检查输入后重试'
     throw Object.assign(new Error(message), { status: response.status })
   }
   if (response.status === 204) return null
