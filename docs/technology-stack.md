@@ -37,6 +37,8 @@
 
 教案使用 `TableInsert` 插入原生表格。模型返回的 Markdown 管道表格由后端解析为段落和表格，整篇生成由 python-docx 写入，光标建议采纳时由 DOCX Editor 通过富文本粘贴写入。候选在编辑器画布内定位显示，未采纳的内容不进入文档。中文字体目录通过 `supportedFamilies` 配置，HarfBuzz WASM 随应用提供。预览与导出分别依赖客户端与转换服务器可用的字体。[表格和工具栏插槽](https://www.docx-editor.dev/docs/2.x/guides/chrome-slots#images-and-tables) · [字体配置](https://www.docx-editor.dev/docs/2.x/guides/fonts)
 
+模板填充沿用目标段落的字体、字号与行距。编辑器内采纳多段文字或表格时，后端用 python-docx 生成含中文字体字段的 Word 片段，通过固定版本 DOCX Editor 的富文本粘贴写入。升级编辑器时验证片段粘贴、字体与段落格式。[DOCX 富文本粘贴与格式兼容](https://www.docx-editor.dev/docs/2.x/docx-fidelity)
+
 ## 待验证和待选型
 
 - 资料向量检索的候选为 PostgreSQL + pgvector 与 Qwen3-Embedding。以真实中文课程样本比较证据召回、章节切分与引用页码后再确认。

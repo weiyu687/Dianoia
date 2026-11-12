@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, ValidationError
 
 from .auth import DB, Teacher, course_access
-from .lesson_content import continuation_delta, lesson_blocks
+from .lesson_content import WritingFormat, continuation_delta, lesson_blocks, writing_fragment
 from .lesson_template_fill import fill_template, template_targets
 from .lesson_templates import owned_template
 from .lessons import (
@@ -64,6 +64,7 @@ class WritingRequest(BaseModel):
     before: str = Field(default="", max_length=14000)
     after: str = Field(default="", max_length=14000)
     instruction: str = Field(default="", max_length=2000)
+    formatting: WritingFormat | None = None
 
 
 @router.post("/writing")
@@ -82,7 +83,11 @@ def write(data: WritingRequest, db: DB, user: Teacher):
         text = continuation_delta(text, data.before, data.after)
         if not text.strip():
             raise HTTPException(502, "模型只返回了已有文字，请调整要求后重试")
-    return {"text": text, "blocks": lesson_blocks(text), "sources_used": references, "sources_unavailable": unavailable}
+    blocks = lesson_blocks(text)
+    result = {"text": text, "blocks": blocks, "sources_used": references, "sources_unavailable": unavailable}
+    if data.formatting is not None and (len(blocks) > 1 or any(block["type"] == "table" for block in blocks)):
+        result["fragment"] = writing_fragment(blocks, data.formatting)
+    return result
 
 
 class GenerationRequest(NewLesson):

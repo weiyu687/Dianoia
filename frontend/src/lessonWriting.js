@@ -16,6 +16,24 @@ export const writingOptions = {
 }
 
 const escapeHtml = (value) => value.replace(/[&<>]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[char])
+const fontAliases = new Map([['仿宋_GB2312', '仿宋'], ['楷体_GB2312', '楷体']])
+
+function writingFormat(instance) {
+  const format = instance.query({ type: 'selectionFormatting' }) ?? {}
+  const family = format.fontFamily?.split(';', 1)[0].trim()
+  const bounded = (value, min, max) => Number.isFinite(value) && value >= min && value <= max ? value : undefined
+  return {
+    font_family: family && family.length <= 64 ? fontAliases.get(family) ?? family : undefined,
+    font_size: bounded(format.fontSizePt, 1, 1638),
+    line_rule: format.lineSpacing?.rule,
+    line_spacing: bounded(format.lineSpacing?.value, 0.01, 1584),
+    space_before: bounded(format.spaceBeforePt, 0, 1584),
+    space_after: bounded(format.spaceAfterPt, 0, 1584),
+    bold: format.bold,
+    italic: format.italic,
+  }
+}
+
 function richTable(block) {
   const row = (cells, tag) => '<tr>' + cells.map((text) =>
     '<' + tag + ' style="border:1px solid #808080">' + escapeHtml(text) + '</' + tag + '>',
@@ -58,29 +76,39 @@ export function useLessonWriting({ editor, canvas, caret, id, title, notice }) {
     return Array.from(host.querySelectorAll(selector)).filter((node) => node.getClientRects().length).at(-1)?.getBoundingClientRect() || null
   }
 
-  function position(allowCached = false) {
+  function position() {
     if (!mode.value || !canvas.value) return
-    const measured = selectionRect(mode.value === 'continue')
-    if (measured?.height) lastRect = measured
-    const rect = measured?.height ? measured : allowCached === true ? lastRect : null
     const bounds = canvas.value.getBoundingClientRect()
-    if (!rect || !rect.height) {
+    const viewport = canvas.value.querySelector('.word-viewport')
+    const scrollTop = viewport?.scrollTop ?? 0
+    const scrollLeft = viewport?.scrollLeft ?? 0
+    const measured = selectionRect(mode.value === 'continue')
+    if (measured?.height) {
+      lastRect = {
+        top: measured.top - bounds.top + scrollTop,
+        left: measured.left - bounds.left + scrollLeft,
+        height: measured.height,
+      }
+    }
+    if (!lastRect) {
       anchor.value = null
       return
     }
-    if (rect.bottom < bounds.top || rect.top > bounds.top + bounds.height) {
+    const top = lastRect.top - scrollTop
+    const bottom = top + lastRect.height
+    if (bottom < 0 || top > bounds.height) {
       anchor.value = null
       return
     }
     const width = Math.min(suggestion.value ? 440 : action.value ? 310 : 176, bounds.width - 24)
-    const left = Math.min(Math.max(12, rect.left - bounds.left), bounds.width - width - 12)
-    const bottomSpace = bounds.top + bounds.height - rect.bottom
+    const left = Math.min(Math.max(12, lastRect.left - scrollLeft), bounds.width - width - 12)
+    const bottomSpace = bounds.height - bottom
     const height = suggestion.value ? 260 : action.value ? 170 : writingOptions[mode.value].length * 36 + 12
-    const above = bottomSpace < height && rect.top - bounds.top > bottomSpace
+    const above = bottomSpace < height && top > bottomSpace
     anchor.value = {
       left: left + 'px',
       width: width + 'px',
-      ...(above ? { bottom: bounds.top + bounds.height - rect.top + 6 + 'px' } : { top: Math.max(0, rect.bottom - bounds.top) + 6 + 'px' }),
+      ...(above ? { bottom: bounds.height - top + 6 + 'px' } : { top: Math.max(0, bottom) + 6 + 'px' }),
     }
   }
 
@@ -113,8 +141,9 @@ export function useLessonWriting({ editor, canvas, caret, id, title, notice }) {
       const rect = selectionRect(true)
       if (rect?.height) insertionPoint = editor.value.positionAtPoint(rect.left, rect.top + rect.height / 2)
     }
-    pin = editor.value.retainSelection()
     position()
+    pin = editor.value.retainSelection()
+    if (!anchor.value) scheduleSelection()
   }
 
   function updateSelection() {
@@ -125,6 +154,7 @@ export function useLessonWriting({ editor, canvas, caret, id, title, notice }) {
     if (!state.editable || !state.selection || state.image || state.selectionCollapsed) {
       dismissedSelection = ''
       if (mode.value === 'rewrite') clear()
+      else if (mode.value === 'continue') position()
       return
     }
     const text = instance.query({ type: 'selectedText' })
@@ -166,7 +196,7 @@ export function useLessonWriting({ editor, canvas, caret, id, title, notice }) {
   async function choose(option) {
     action.value = option
     error.value = ''
-    position(true)
+    position()
     await nextTick()
     instructionInput.value?.focus({ preventScroll: true })
   }
@@ -208,6 +238,7 @@ export function useLessonWriting({ editor, canvas, caret, id, title, notice }) {
         method: 'POST', signal: current.signal, body: {
           lesson_id: id, section: title().trim() || '教案正文', mode: mode.value,
           instruction: [action.value[1], instruction.value.trim()].filter(Boolean).join('\n'),
+          formatting: writingFormat(instance),
           ...selection,
         },
       })
@@ -237,11 +268,16 @@ export function useLessonWriting({ editor, canvas, caret, id, title, notice }) {
       return
     }
     instance.focus()
-    const html = result.blocks?.some((block) => block.type === 'table')
-      ? result.blocks.map((block) => block.type === 'table'
-        ? richTable(block) : '<p>' + escapeHtml(block.text) + '</p>').join('')
-      : undefined
-    const outcome = instance.exec({ type: 'paste', text: html ? '' : result.text, html })
+    const blocks = result.blocks ?? []
+    const hasTable = blocks.some((block) => block.type === 'table')
+    const tableFallback = hasTable
+      ? blocks.map((block) => block.type === 'table' ? richTable(block) : '<p>' + escapeHtml(block.text) + '</p>').join('')
+      : ''
+    // The pinned editor consumes this Word fragment as one paste operation.
+    const html = result.fragment && /^[A-Za-z0-9+/=]+$/.test(result.fragment)
+      ? '<div data-docx-fragment="' + result.fragment + '" data-docx-fragment-end="open">' + tableFallback + '</div>'
+      : tableFallback || undefined
+    const outcome = instance.exec({ type: 'paste', text: hasTable ? '' : result.text, html })
     clear()
     notice.value = outcome.ok && outcome.changed ? '已采纳 AI 建议' : '无法在当前位置写入，请选择可编辑的正文'
   }
@@ -259,10 +295,19 @@ export function useLessonWriting({ editor, canvas, caret, id, title, notice }) {
       if (!state?.editable || !state.selection || state.image) return
       event.preventDefault()
       event.stopPropagation()
-      if (state.selectionCollapsed) {
-        open('continue')
-        nextTick(() => canvas.value?.querySelector('.writing-options button')?.focus({ preventScroll: true }))
-      } else scheduleSelection()
+      if (state.selectionCollapsed) open('continue')
+      else scheduleSelection()
+    } else if (mode.value && !action.value && anchor.value
+        && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey
+        && (['ArrowDown', 'ArrowUp'].includes(event.key) || (!inPopup && event.key === 'Tab'))) {
+      const options = Array.from(canvas.value.querySelectorAll('.writing-options button'))
+      if (!options.length) return
+      event.preventDefault()
+      event.stopPropagation()
+      const index = options.indexOf(document.activeElement)
+      const step = event.key === 'ArrowUp' ? -1 : 1
+      const next = index < 0 && step < 0 ? options.length - 1 : (index + step + options.length) % options.length
+      options[next].focus({ preventScroll: true })
     } else if (mode.value && (event.key === 'Escape' || (suggestion.value && event.key === 'Tab' && !event.shiftKey))) {
       event.preventDefault()
       event.stopPropagation()

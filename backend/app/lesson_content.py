@@ -1,7 +1,14 @@
 import re
+from base64 import b64encode
+from io import BytesIO
+from typing import Literal
 
+from docx import Document
+from docx.enum.text import WD_LINE_SPACING
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+from docx.shared import Pt
+from pydantic import BaseModel, Field
 
 CELL_SPLIT = re.compile(r"(?<!\\)\|")
 DIVIDER = re.compile(r":?-{3,}:?")
@@ -76,3 +83,52 @@ def add_lesson_table(document, block):
                 for run in cell.paragraphs[0].runs:
                     run.bold = True
     return table
+
+
+class WritingFormat(BaseModel):
+    font_family: str | None = Field(default=None, pattern=r"^[^\x00-\x1f\x7f]{1,64}$")
+    font_size: float | None = Field(default=None, gt=0, le=1638)
+    line_rule: Literal["multiple", "exact", "atLeast"] | None = None
+    line_spacing: float | None = Field(default=None, gt=0, le=1584)
+    space_before: float | None = Field(default=None, ge=0, le=1584)
+    space_after: float | None = Field(default=None, ge=0, le=1584)
+    bold: bool | None = None
+    italic: bool | None = None
+
+
+def writing_fragment(blocks, style):
+    document = Document()
+
+    def format_paragraph(paragraph):
+        settings = paragraph.paragraph_format
+        if style.line_spacing is not None:
+            if style.line_rule == "multiple":
+                settings.line_spacing = min(style.line_spacing, 40)
+            else:
+                settings.line_spacing = Pt(style.line_spacing)
+                if style.line_rule == "atLeast":
+                    settings.line_spacing_rule = WD_LINE_SPACING.AT_LEAST
+        if style.space_before is not None:
+            settings.space_before = Pt(style.space_before)
+        if style.space_after is not None:
+            settings.space_after = Pt(style.space_after)
+        for run in paragraph.runs:
+            if style.font_family:
+                run.font.name = style.font_family
+                run._r.rPr.rFonts.set(qn("w:eastAsia"), style.font_family)
+            if style.font_size is not None:
+                run.font.size = Pt(style.font_size)
+            if run.bold is not True:
+                run.bold = style.bold
+            run.italic = style.italic
+
+    for block in blocks:
+        if block["type"] == "paragraph":
+            format_paragraph(document.add_paragraph(block["text"]))
+        else:
+            for row in add_lesson_table(document, block).rows:
+                for cell in row.cells:
+                    format_paragraph(cell.paragraphs[0])
+    buffer = BytesIO()
+    document.save(buffer)
+    return b64encode(buffer.getvalue()).decode("ascii")

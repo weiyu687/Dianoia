@@ -1,8 +1,10 @@
 import re
+from copy import deepcopy
 from dataclasses import dataclass
 
 from docx.oxml.ns import qn
 from docx.text.paragraph import Paragraph
+from docx.text.run import Run
 
 from .lesson_content import add_lesson_table, lesson_blocks
 
@@ -15,6 +17,7 @@ CONTENT_LABELS = {
     "思政融入", "使用教材", "教学参考资料",
 }
 FIXED_LABELS = {"课程名称", "课程代码", "任课教师", "授课主题", "章节名称"}
+FONT_ALIASES = {"仿宋_GB2312": "仿宋", "楷体_GB2312": "楷体"}
 
 
 @dataclass(frozen=True)
@@ -83,13 +86,14 @@ def fill_text(paragraph, token, value):
     if not token:
         run = paragraph.runs[-1] if paragraph.runs else paragraph.add_run()
         run.add_text(value)
-        return
+        return run
     text = "".join(node.text or "" for node in nodes)
     start = text.find(token)
     if start < 0:
         return
     end = start + len(token)
     offset = 0
+    run = None
     for node in nodes:
         current = node.text or ""
         next_offset = offset + len(current)
@@ -98,7 +102,45 @@ def fill_text(paragraph, token, value):
             right = min(len(current), end - offset)
             node.text = current[:left] + (value if offset <= start else "") + current[right:]
             node.set(qn("xml:space"), "preserve")
+            if run is None:
+                run = Run(node.getparent(), paragraph)
         offset = next_offset
+    return run
+
+
+def normalize_fonts(properties):
+    if properties is None:
+        return
+    for fonts in properties.xpath(".//w:rFonts"):
+        for slot in ("ascii", "hAnsi", "eastAsia", "cs"):
+            key = qn(f"w:{slot}")
+            family = fonts.get(key)
+            if family:
+                primary = family.split(";", 1)[0].strip()
+                if primary:
+                    fonts.set(key, FONT_ALIASES.get(primary, primary))
+
+
+def inherit_format(paragraph, ppr, rpr, *, table_cell=False, bold=False):
+    if ppr is not None:
+        properties = deepcopy(ppr)
+        exclude = {"sectPr", "pageBreakBefore", "numPr"}
+        if table_cell:
+            exclude.update({"ind", "keepNext", "keepLines", "pBdr", "tabs"})
+        for name in exclude:
+            child = properties.find(qn(f"w:{name}"))
+            if child is not None:
+                properties.remove(child)
+        if paragraph._p.pPr is not None:
+            paragraph._p.remove(paragraph._p.pPr)
+        paragraph._p.insert(0, properties)
+    for run in paragraph.runs:
+        if rpr is not None:
+            if run._r.rPr is not None:
+                run._r.remove(run._r.rPr)
+            run._r.insert(0, deepcopy(rpr))
+        if bold:
+            run.bold = True
 
 
 def fill_template(document, targets, values):
@@ -111,13 +153,23 @@ def fill_template(document, targets, values):
             continue
         blocks = lesson_blocks(value)
         first = blocks.pop(0) if blocks and blocks[0]["type"] == "paragraph" else None
-        fill_text(target.paragraph, target.token, first["text"] if first else "")
+        run = fill_text(target.paragraph, target.token, first["text"] if first else "")
         after = target.paragraph._p
+        after_format = after.pPr
+        normalize_fonts(after_format)
+        rpr = run._r.rPr if run is not None else None
+        normalize_fonts(rpr)
         for block in blocks:
             if block["type"] == "table":
-                node = add_lesson_table(document, block)._tbl
+                table = add_lesson_table(document, block)
+                for index, row in enumerate(table.rows):
+                    for cell in row.cells:
+                        inherit_format(cell.paragraphs[0], after_format, rpr, table_cell=True, bold=index == 0)
+                node = table._tbl
             else:
-                node = document.add_paragraph(block["text"], style=target.paragraph.style)._p
+                paragraph = document.add_paragraph(block["text"])
+                inherit_format(paragraph, after_format, rpr)
+                node = paragraph._p
             after.addnext(node)
             after = node
         if after.tag == qn("w:tbl") and after.getparent().tag == qn("w:tc") and after.getnext() is None:

@@ -1,11 +1,14 @@
 import json
 import os
 import unittest
+from base64 import b64decode
 from io import BytesIO
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from docx import Document
+from docx.oxml.ns import qn
+from docx.shared import Pt
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
 from pypdf import PdfReader
@@ -227,7 +230,13 @@ class WorkflowTest(unittest.TestCase):
         label = marked.add_paragraph("目标：")
         label.add_run("{{教学").bold = True
         label.add_run("目标}}")
-        marked.add_paragraph("{{课堂安排}}")
+        arrangement = marked.add_paragraph()
+        arrangement.paragraph_format.line_spacing = 1.5
+        arrangement.paragraph_format.space_after = Pt(6)
+        run = arrangement.add_run("{{课堂安排}}")
+        run.font.name = "仿宋_GB2312;仿宋"
+        run.font.size = Pt(12)
+        run._r.rPr.rFonts.set(qn("w:eastAsia"), "仿宋_GB2312;仿宋")
         marked.add_paragraph("固定栏目说明")
         marked_template = client.post(templates, files={
             "file": ("marked.docx", save_word(marked)),
@@ -237,7 +246,8 @@ class WorkflowTest(unittest.TestCase):
             self.assertTrue(structured)
             self.assertEqual(set(json.loads(prompt)["预期 JSON"]["fields"]), {"教学目标", "课堂安排"})
             return json.dumps({"fields": {
-                "教学目标": "理解数据校验", "课堂安排": "| 环节 | 内容 |\n| --- | --- |\n| 练习 | 校验输入 |",
+                "教学目标": "理解数据校验",
+                "课堂安排": "第一段\n第二段\n| 环节 | 内容 |\n| --- | --- |\n| 练习 | 校验输入 |\n表后说明",
                 "固定栏目说明": "模型多返回的栏目",
             }})
 
@@ -250,6 +260,14 @@ class WorkflowTest(unittest.TestCase):
         self.assertTrue(filled_doc.paragraphs[2].runs[1].bold)
         self.assertEqual(filled_doc.paragraphs[-1].text, "固定栏目说明")
         self.assertEqual(filled_doc.tables[0].cell(1, 1).text, "校验输入")
+        body = [paragraph for paragraph in filled_doc.paragraphs if paragraph.text in {"第一段", "第二段", "表后说明"}]
+        self.assertEqual(len(body), 3)
+        body.append(filled_doc.tables[0].cell(1, 1).paragraphs[0])
+        for paragraph in body:
+            self.assertEqual(paragraph.paragraph_format.line_spacing, 1.5)
+            self.assertEqual(paragraph.paragraph_format.space_after, Pt(6))
+            self.assertEqual(paragraph.runs[0].font.size, Pt(12))
+            self.assertEqual(paragraph.runs[0]._r.rPr.rFonts.get(qn("w:eastAsia")), "仿宋")
 
         with patch("app.ai.generate", side_effect=fill_generated_sections):
             appended = client.post("/api/ai/lessons", json={
@@ -261,10 +279,16 @@ class WorkflowTest(unittest.TestCase):
         with patch("app.ai.generate", return_value="| 环节 | 内容 |\n| --- | --- |\n| 练习 | A |"):
             suggestion = client.post("/api/ai/writing", json={
                 "lesson_id": generated["id"], "section": "正文", "mode": "continue",
+                "formatting": {"font_family": "仿宋", "font_size": 14, "line_rule": "multiple", "line_spacing": 1.5},
             }).raise_for_status().json()
         self.assertEqual(suggestion["blocks"], [
             {"type": "table", "header": ["环节", "内容"], "rows": [["练习", "A"]]},
         ])
+        fragment = Document(BytesIO(b64decode(suggestion["fragment"])))
+        sample = fragment.tables[0].cell(1, 1).paragraphs[0]
+        self.assertEqual(sample.paragraph_format.line_spacing, 1.5)
+        self.assertEqual(sample.runs[0].font.size, Pt(14))
+        self.assertEqual(sample.runs[0]._r.rPr.rFonts.get(qn("w:eastAsia")), "仿宋")
         plan = client.post("/api/lessons", json={
             "course_id": course, "title": "模板教案", "template_id": template["id"],
         }).raise_for_status().json()

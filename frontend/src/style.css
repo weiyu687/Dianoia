@@ -234,6 +234,7 @@ dialog::backdrop { background: #080713b0; backdrop-filter: blur(3px); }
 .lesson-writing { position: absolute; z-index: 4; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 28px var(--shadow); }
 .writing-options { display: grid; gap: 2px; padding: 5px; }
 .writing-options .button { justify-content: flex-start; }
+.writing-options .button:focus-visible { outline-offset: -2px; }
 .writing-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; padding: 4px; }
 .writing-options .button, .writing-controls .button { min-height: 32px; padding: 4px 8px; }
 .writing-form { display: grid; gap: 8px; padding: 10px; }
