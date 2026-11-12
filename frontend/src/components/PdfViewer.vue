@@ -108,7 +108,7 @@ defineExpose({ jump })
 <template>
   <div class="pdf-viewer">
     <div class="pdf-toolbar">
-      <strong>PDF 预览</strong><div class="actions">
+      <strong>PDF 预览</strong><div class="actions page-navigation">
         <button class="button subtle icon-only" aria-label="上一页" :disabled="!total || activePage <= 1" @click="jump(activePage - 1)"><ChevronLeft :size="17" /></button>
         <input type="number" aria-label="跳转页码" :value="activePage" min="1" :max="total || 1" :disabled="!total" @change="submitPage" @keydown.enter.prevent="submitPage">
         <span class="muted">/ {{ total || '—' }}</span>

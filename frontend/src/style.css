@@ -209,7 +209,10 @@ dialog::backdrop { background: #080713b0; backdrop-filter: blur(3px); }
 .outline-fields .icon-only { min-width: 24px; padding-inline: 4px; }
 .outline-fields .actions { gap: 4px; }
 .pdf-viewer { min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--raised); }
-.pdf-toolbar { display: flex; justify-content: space-between; gap: 10px; align-items: center; flex-wrap: wrap; padding: 8px 12px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.pdf-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 8px; padding: 6px 12px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.pdf-toolbar > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pdf-toolbar .page-navigation, .word-page-number { grid-column: 2; justify-content: center; gap: 6px; }
+.pdf-toolbar .page-navigation input[type="number"], .word-page-number input[type="number"] { width: 6ch; padding: 4px 6px; text-align: center; font-variant-numeric: tabular-nums; }
 .pdf-surface { position: relative; height: clamp(360px, 70vh, 900px); background: var(--raised); }
 .pdf-scroll { position: absolute; inset: 0; width: min(100%, 960px); margin-inline: auto; overflow: auto; scrollbar-gutter: stable; }
 .pdf-scroll .pdfViewer { --page-margin: 8px auto; }
@@ -222,15 +225,16 @@ dialog::backdrop { background: #080713b0; backdrop-filter: blur(3px); }
 .editor-title input:hover { border-color: var(--line); }
 .word-editor { min-width: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
 .word-toolbar { min-width: 0; }
-.word-actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 8px 12px; border-block: 1px solid var(--line); }
+.word-actions { display: flex; justify-content: center; align-items: center; padding: 6px 12px; border-block: 1px solid var(--line); }
 .word-editor kbd { border: 1px solid var(--line); border-radius: 4px; font-size: 11px; padding: 1px 5px; }
 .word-page-number, .word-page-number label { display: flex; gap: 6px; align-items: center; font-variant-numeric: tabular-nums; }
-.word-page-number input { width: 5.5ch; padding: 3px 5px; }
 .word-notice { padding: 8px 12px; color: var(--muted); }
 .word-viewport { height: clamp(420px, 72vh, 920px); }
 .word-canvas { position: relative; min-width: 0; overflow: hidden; border-radius: 0 0 13px 13px; }
 .lesson-writing { position: absolute; z-index: 4; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 28px var(--shadow); }
-.writing-options, .writing-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; padding: 4px; }
+.writing-options { display: grid; gap: 2px; padding: 5px; }
+.writing-options .button { justify-content: flex-start; }
+.writing-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; padding: 4px; }
 .writing-options .button, .writing-controls .button { min-height: 32px; padding: 4px 8px; }
 .writing-form { display: grid; gap: 8px; padding: 10px; }
 .writing-form .writing-controls { justify-content: flex-end; padding: 0; }
@@ -238,6 +242,8 @@ dialog::backdrop { background: #080713b0; backdrop-filter: blur(3px); }
 .writing-draft { max-height: min(16rem, 34vh); overflow: auto; overflow-wrap: anywhere; padding: 10px 12px 4px; color: var(--muted); white-space: pre-wrap; }
 .writing-draft table { width: 100%; margin-block: 6px; border-collapse: collapse; }
 .writing-draft :is(th, td) { border: 1px solid var(--line); padding: 4px 8px; text-align: left; }
+.writing-references { max-height: 90px; overflow: auto; margin-inline: 12px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.writing-references p { margin-top: 4px; }
 .writing-suggestion .writing-controls { justify-content: flex-end; }
 .template-actions { justify-content: flex-end; }
 

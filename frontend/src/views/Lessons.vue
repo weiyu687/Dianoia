@@ -81,10 +81,10 @@ async function create(event) {
     const generate = event.submitter?.value === 'generate'
     const body = {
       course_id: courseId.value, title: newTitle.value, instruction: instruction.value,
+      template_id: templateId.value || null,
       sources: sources.value.filter((item) => item.resource_id).map(({ resource_id, start, end }) => ({ resource_id, start, end })),
     }
     if (!generate) {
-      body.template_id = templateId.value || null
       body.blank_document = !templateId.value
     }
     const plan = await api(generate ? '/ai/lessons' : '/lessons', { method: 'POST', body })
@@ -151,8 +151,8 @@ async function perform(item, action, title) {
             <option v-for="template in templates" :key="template.id" :value="template.id">{{ template.title }}</option>
           </select>
         </label>
-        <p v-if="templateId" class="muted">新教案将加载所选模板的全部内容。</p>
-        <label v-else>生成要求<textarea v-model="instruction" maxlength="3000" rows="3" placeholder="可填写授课对象、课时及教学目标"></textarea></label>
+        <p v-if="templateId" class="muted">AI 会填充可识别的栏目。没有可填栏目时，生成内容会追加在模板末尾。</p>
+        <label>生成要求<textarea v-model="instruction" maxlength="3000" rows="3" placeholder="可填写授课对象、课时及教学目标"></textarea></label>
         <div class="section-heading"><h3>参考资料</h3><button class="button secondary" type="button" :disabled="!resources.length || sources.length >= 12" @click="sources.push({ resource_id: '', start: 1, end: 1, max: 1, outline: [] })"><Plus :size="15" /> 添加资料</button></div>
         <p v-if="!resources.length" class="muted">资料库有已入库的文件后，可选择章节或页码。</p>
         <div v-for="(entry, index) in sources" :key="index" class="source-picker">
@@ -162,8 +162,8 @@ async function perform(item, action, title) {
         </div>
         <p v-if="formError" class="error" role="alert">{{ formError }}</p>
         <div class="dialog-actions">
-          <button class="button" :class="templateId ? 'primary' : 'secondary'" type="submit" value="blank" :disabled="busy">{{ templateId ? '使用模板创建' : '创建空白教案' }}</button>
-          <button v-if="!templateId" class="button primary" type="submit" value="generate" :disabled="busy"><Sparkles :size="16" /> {{ busy ? '正在处理' : 'AI 生成教案' }}</button>
+          <button class="button secondary" type="submit" value="blank" :disabled="busy">{{ templateId ? '使用模板创建' : '创建空白教案' }}</button>
+          <button class="button primary" type="submit" value="generate" :disabled="busy"><Sparkles :size="16" /> {{ busy ? '正在处理' : templateId ? '按模板生成' : 'AI 生成教案' }}</button>
         </div>
       </form>
     </Modal>

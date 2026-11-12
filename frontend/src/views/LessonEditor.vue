@@ -1,9 +1,9 @@
 <script setup>
-import { onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { defineComponent, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import {
   DocxEditorContent, DocxEditorContentControl, DocxEditorContextMenu, DocxEditorEquation,
   DocxEditorHyperLink, DocxEditorLoading, DocxEditorOpenFailure, DocxEditorRoot,
-  DocxEditorToolbar, DocxEditorViewport, LocaleProvider,
+  DocxEditorToolbar, DocxEditorViewport, LocaleProvider, useEditorCaret,
 } from '@docx-editor.dev/vue'
 import { zhCN } from '@docx-editor.dev/i18n'
 import { setHarfBuzzWasmUrl } from '@docx-editor.dev/core/layout'
@@ -34,10 +34,17 @@ const page = ref(1)
 const totalPages = ref(0)
 const pageInput = ref(null)
 const canvas = ref(null)
+const caret = shallowRef(null)
+const EditorCaret = defineComponent({
+  setup() {
+    watch(useEditorCaret(), (value) => { caret.value = value }, { immediate: true, flush: 'sync' })
+    return () => null
+  },
+})
 const chineseFonts = { supportedFamilies: [
   '宋体', '黑体', '仿宋', '楷体', '微软雅黑', '等线', '华文中宋', '华文楷体', '思源宋体', '思源黑体',
 ] }
-const writing = useLessonWriting({ editor, canvas, id, title: () => lesson.value.title, notice })
+const writing = useLessonWriting({ editor, canvas, caret, id, title: () => lesson.value.title, notice })
 const { mode, action, instruction, instructionInput, suggestion, busy: writingBusy, error: writingError, anchor } = writing
 let editVersion = 0
 let unsubscribe = null
@@ -79,6 +86,12 @@ function jumpPage() {
   }
   updatePage()
   input.value = page.value
+}
+
+function viewportScrolled(event) {
+  if (event.target.closest?.('.lesson-writing')) return
+  updatePage()
+  writing.position()
 }
 
 function preventUnload(event) {
@@ -175,6 +188,7 @@ async function exportFile(format, event) {
       <section v-show="!preview" class="word-editor" aria-label="Word 教案编辑器" @keydown.capture="writing.keydown">
         <LocaleProvider :i18n="zhCN">
           <DocxEditorRoot :document="documentBytes" locale="zh-CN" :color-mode="theme" :fonts="chineseFonts" @ready="editorReady" @change="documentChanged">
+            <EditorCaret />
             <div class="word-toolbar">
               <DocxEditorToolbar>
                 <DocxEditorToolbar.Group id="insert" label="插入" after="text" :priority="75">
@@ -190,7 +204,7 @@ async function exportFile(format, event) {
               </form>
             </div>
             <p v-if="notice" class="word-notice" role="status">{{ notice }}</p>
-            <div ref="canvas" class="word-canvas" @pointerdown.capture="writing.pointerDown" @scroll.capture="updatePage(); writing.position()">
+            <div ref="canvas" class="word-canvas" @pointerdown.capture="writing.pointerDown" @scroll.capture="viewportScrolled">
               <DocxEditorViewport class="word-viewport">
                 <DocxEditorContent />
                 <DocxEditorHyperLink />
@@ -213,6 +227,11 @@ async function exportFile(format, event) {
                     </template>
                     <p v-else>{{ suggestion.text }}</p>
                   </div>
+                  <details v-if="suggestion.sources_used?.length" class="writing-references">
+                    <summary>本次参考资料</summary>
+                    <p v-for="(reference, index) in suggestion.sources_used" :key="index">{{ reference.title }} · 第 {{ reference.pages.join('、') }} 页</p>
+                  </details>
+                  <p v-if="suggestion.sources_unavailable" class="writing-references">有 {{ suggestion.sources_unavailable }} 项关联资料已不可用。</p>
                   <div class="writing-controls">
                     <button class="button subtle" type="button" @mousedown.prevent @click="writing.apply">采纳 <kbd>Tab</kbd></button>
                     <button class="button subtle" type="button" @mousedown.prevent @click="writing.clear(true)">取消 <kbd>Esc</kbd></button>

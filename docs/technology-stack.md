@@ -15,7 +15,7 @@
 | PDF 查看 | PDF.js 5.4.624 | 资料、教案和模板共用原生 `PDFViewer`，支持连续滚动、按页渲染、页码同步和直接跳页。 |
 | 教案文档 | `@docx-editor.dev/vue`、`core` 和 `i18n` 2.37.0，python-docx，LibreOffice | 分页在线编辑 DOCX，模板与教案副本在数据库存储。旧版 DOC 输入转为 DOCX，PDF 和 DOC 输出从当前文档版本转换。 |
 | 旧教案兼容 | python-docx、ReportLab | 原有结构化教案可转换为 DOCX 打开。已有 PDF 导出在旧数据仍使用 ReportLab，首次在分页编辑器保存后使用 DOCX 转换。 |
-| 教案生成与写作 | HTTPX、兼容 OpenAI Chat Completions 的配置端点 | 按指定资料页码生成草稿，支持编辑器内续写与重写。提供方与模型从环境配置读取。 |
+| 教案生成与写作 | HTTPX、兼容 OpenAI Chat Completions 的配置端点 | 空白或模板生成与编辑器写作共用授权资料页提取。提供方与模型从环境配置读取。 |
 | 教师 Agent | LangChain Deep Agents、LangChain OpenAI 适配器、Skills | 可选安装。现有工具按教师和课程读取资料、目录、逐页正文与教案。 |
 | 验证 | Python unittest、FastAPI TestClient、Vite 生产构建、Chrome | 回归覆盖关键业务、权限和保存冲突。模型调用可用替身验证。 |
 
@@ -29,6 +29,7 @@
 | 2026-11-12 | 首版资料处理 | 选择 LibreOffice 固定 Office 分页，pypdf 提取 PDF 书签与正文，PDF.js 负责统一预览。目录与教案选页使用同一页码。扫描件 OCR 留待独立评估。 |
 | 2026-11-12 | 首版教案编辑 | 采用 Tiptap 验证结构化草稿和光标续写。分页模板编辑获批后迁入直接读写 DOCX 的编辑器。 |
 | 2026-11-12 | Word 分页编辑和模板 | 用户确认采用 DOCX Editor 的 Vue 与 Core 包。采用 Apache-2.0 的分页、编辑与保存能力，复用现有 LibreOffice 处理 DOC 与 PDF。在隔离环境中验证学校旧版 Word 模板转换、浏览器 4 页展示、表格编辑保存和导出页数。 |
+| 2026-11-12 | Word 模板 AI 填充 | 使用现有模型的 JSON 响应按栏目输出，python-docx 按 `{{栏目名}}`、已知标题说明和相邻空白单元格定位写入，保留已有布局。未识别到教学栏目时在模板末尾追加生成内容。 |
 
 中文字体和复杂对象可能影响分页。新增学校模板时可用原件对照在线编辑和 PDF 导出。[Vue 组合接口](https://www.docx-editor.dev/docs/2.x/vue/composition) · [DOCX 格式兼容](https://www.docx-editor.dev/docs/2.x/docx-fidelity) · [LibreOffice 转换格式](https://help.libreoffice.org/latest/en-US/text/shared/guide/convertfilters.html)
 
@@ -39,7 +40,7 @@
 ## 待验证和待选型
 
 - 资料向量检索的候选为 PostgreSQL + pgvector 与 Qwen3-Embedding。以真实中文课程样本比较证据召回、章节切分与引用页码后再确认。
-- 对话持久化、Agent 修改教案、模板自动字段填充、耗时任务队列、数据库迁移、对象存储及生产部署需要单独验收。
+- 对话持久化、Agent 修改教案、耗时任务队列、数据库迁移、对象存储及生产部署需要单独验收。
 - 知识框架、PPT、试卷、批改、学情分析、数字人和语音分别进入组件选型流程。
 
 后续每个组件获批后，在本页记录日期、技术及版本、选择理由、运行条件和验证结果。依赖变更同时更新依赖文件和开发日志。

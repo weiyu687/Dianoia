@@ -21,7 +21,7 @@ from sqlalchemy import select, update
 
 from .auth import DB, Teacher, course_access
 from .documents import WORD_EXTENSIONS
-from .lesson_content import lesson_blocks
+from .lesson_content import add_lesson_table, lesson_blocks
 from .lesson_templates import owned_template
 from .models import Lesson, LessonDocument, identifier, now
 from .resources import owned_resource
@@ -96,22 +96,38 @@ def owned_lesson(db, user, lesson_id):
     return row
 
 
-def source_text(db, user, course_id, selections):
+def lesson_sources(db, user, course_id, selections, *, skip_unavailable=False):
     chunks = []
+    references = []
+    unavailable = 0
+    included = set()
     for source in selections:
-        resource = owned_resource(db, user, source.resource_id)
-        if resource.extension in WORD_EXTENSIONS and not resource.has_preview:
-            raise HTTPException(409, "请先在资料库中将 Word 资料转换为 PDF")
-        if (resource.course_id != course_id or resource.status != "ready"
-                or not 1 <= source.start <= source.end <= len(resource.pages)):
-            raise HTTPException(422, "请使用当前课程已入库的资料并核对页码")
+        try:
+            resource = owned_resource(db, user, source.resource_id)
+            if (resource.course_id != course_id or resource.status != "ready"
+                    or not 1 <= source.start <= source.end <= len(resource.pages)):
+                raise HTTPException(422, "请使用当前课程已入库的资料并核对页码")
+            if resource.extension in WORD_EXTENSIONS and not resource.has_preview:
+                raise HTTPException(409, "请先在资料库中将 Word 资料转换为 PDF")
+        except HTTPException as error:
+            if not skip_unavailable or error.status_code not in {404, 409, 422}:
+                raise
+            unavailable += 1
+            continue
+        pages = []
         for page in range(source.start, source.end + 1):
             if text := resource.pages[page - 1]:
-                chunks.append(f"【{resource.title} 第 {page} 页】\n{text}")
+                pages.append(page)
+                key = (resource.id, page)
+                if key not in included:
+                    chunks.append(f"【{resource.title} 第 {page} 页】\n{text}")
+                    included.add(key)
+        if pages:
+            references.append({"title": resource.title, "pages": pages})
     context = "\n\n".join(chunks)
     if len(context) > 45000:
         raise HTTPException(422, "资料范围较长，请缩小选用页码后重试")
-    return context
+    return context, references, unavailable
 
 
 def create_lesson(db, user, data, sections, docx=None):
@@ -139,7 +155,7 @@ def list_lessons(course_id: int, db: DB, user: Teacher):
 @router.post("", status_code=201)
 def new_lesson(data: NewLesson, db: DB, user: Teacher):
     course_access(db, user, data.course_id)
-    source_text(db, user, data.course_id, data.sources)
+    lesson_sources(db, user, data.course_id, data.sources)
     if data.template_id:
         content = owned_template(db, user, data.template_id).content
         return create_lesson(db, user, data, document_sections(Document(BytesIO(content))), content)
@@ -235,6 +251,11 @@ def render_docx(row):
 
 def render_sections_docx(title, sections):
     document = chinese_lesson_document()
+    add_lesson_sections(document, title, sections)
+    return serialize_docx(document)
+
+
+def add_lesson_sections(document, title, sections):
     document.add_heading(title, 0)
     for section, depth in walk_sections(sections):
         document.add_heading(section["title"], level=min(depth, 9))
@@ -242,13 +263,7 @@ def render_sections_docx(title, sections):
             if block["type"] == "paragraph":
                 document.add_paragraph(block["text"])
                 continue
-            rows = [block["header"], *block["rows"]]
-            table = document.add_table(rows=len(rows), cols=len(rows[0]))
-            table.style = "Table Grid"
-            for index, values in enumerate(rows):
-                for cell, value in zip(table.rows[index].cells, values):
-                    cell.text = value
-    return serialize_docx(document)
+            add_lesson_table(document, block)
 
 
 def chinese_lesson_document():

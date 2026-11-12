@@ -149,7 +149,18 @@ class WorkflowTest(unittest.TestCase):
                     self.assertEqual(suggestion["text"], "安排并发实验。")
                     self.assertEqual(suggestion["blocks"], [{"type": "paragraph", "text": "安排并发实验。"}])
                     self.assertIn("教学对象", model.call_args.args[1])
+                    reference = json.loads(model.call_args.args[1])["资料"]
+                    self.assertIn("Repeatable read", reference)
+                    self.assertNotIn("Transactions have clear boundaries", reference)
+                    self.assertEqual(suggestion["sources_used"], [{"title": "事务讲义", "pages": [2]}])
                     self.assertEqual(client.get(route).json()["revision"], 2)
+
+                with patch("app.ai.generate", return_value="数据安全是目前函数设计的重要要求。下一段的已有文字"):
+                    suggestion = client.post("/api/ai/writing", json={
+                        "lesson_id": plan["id"], "section": "正文", "mode": "continue",
+                        "before": "数据安全是目前", "after": "下一段的已有文字",
+                    }).raise_for_status().json()
+                self.assertEqual(suggestion["text"], "函数设计的重要要求。")
 
                 private_template = self.check_lesson_templates(client, course, route)
                 second_teacher = login("t02", "teacher")
@@ -209,6 +220,44 @@ class WorkflowTest(unittest.TestCase):
         generated_doc = Document(BytesIO(client.get(generated_path).raise_for_status().content))
         self.assertIn("模型生成的教学内容", [paragraph.text for paragraph in generated_doc.paragraphs])
         self.assertEqual(generated_doc.tables[0].cell(1, 1).text, "A|B")
+        self.assertTrue(generated_doc.tables[0]._tbl.xpath("./w:tblPr/w:tblBorders/w:insideH"))
+        marked = Document()
+        marked.add_heading("学校教案表单", level=1)
+        marked.add_paragraph("课程名称：{{课程名称}}")
+        label = marked.add_paragraph("目标：")
+        label.add_run("{{教学").bold = True
+        label.add_run("目标}}")
+        marked.add_paragraph("{{课堂安排}}")
+        marked.add_paragraph("固定栏目说明")
+        marked_template = client.post(templates, files={
+            "file": ("marked.docx", save_word(marked)),
+        }).raise_for_status().json()
+
+        def fill_fields(_, prompt, structured):
+            self.assertTrue(structured)
+            self.assertEqual(set(json.loads(prompt)["预期 JSON"]["fields"]), {"教学目标", "课堂安排"})
+            return json.dumps({"fields": {
+                "教学目标": "理解数据校验", "课堂安排": "| 环节 | 内容 |\n| --- | --- |\n| 练习 | 校验输入 |",
+                "固定栏目说明": "模型多返回的栏目",
+            }})
+
+        with patch("app.ai.generate", side_effect=fill_fields):
+            filled = client.post("/api/ai/lessons", json={
+                "course_id": course, "title": "基于模板", "template_id": marked_template["id"],
+            }).raise_for_status().json()
+        filled_doc = Document(BytesIO(client.get(f"/api/lessons/{filled['id']}/document").raise_for_status().content))
+        self.assertIn("目标：理解数据校验", [paragraph.text for paragraph in filled_doc.paragraphs])
+        self.assertTrue(filled_doc.paragraphs[2].runs[1].bold)
+        self.assertEqual(filled_doc.paragraphs[-1].text, "固定栏目说明")
+        self.assertEqual(filled_doc.tables[0].cell(1, 1).text, "校验输入")
+
+        with patch("app.ai.generate", side_effect=fill_generated_sections):
+            appended = client.post("/api/ai/lessons", json={
+                "course_id": course, "title": "无栏目模板", "template_id": template["id"],
+            }).raise_for_status().json()
+        appended_doc = Document(BytesIO(client.get(f"/api/lessons/{appended['id']}/document").raise_for_status().content))
+        self.assertEqual(appended_doc.tables[0].cell(0, 0).text, "模板占位文字")
+        self.assertIn("模型生成的教学内容", [paragraph.text for paragraph in appended_doc.paragraphs])
         with patch("app.ai.generate", return_value="| 环节 | 内容 |\n| --- | --- |\n| 练习 | A |"):
             suggestion = client.post("/api/ai/writing", json={
                 "lesson_id": generated["id"], "section": "正文", "mode": "continue",

@@ -17,12 +17,14 @@ export const writingOptions = {
 
 const escapeHtml = (value) => value.replace(/[&<>]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[char])
 function richTable(block) {
-  const row = (cells, tag) => '<tr>' + cells.map((text) => '<' + tag + '>' + escapeHtml(text) + '</' + tag + '>').join('') + '</tr>'
-  return '<table><thead>' + row(block.header, 'th') + '</thead><tbody>'
+  const row = (cells, tag) => '<tr>' + cells.map((text) =>
+    '<' + tag + ' style="border:1px solid #808080">' + escapeHtml(text) + '</' + tag + '>',
+  ).join('') + '</tr>'
+  return '<table border="1" style="border:1px solid #808080;border-collapse:collapse"><thead>' + row(block.header, 'th') + '</thead><tbody>'
     + block.rows.map((cells) => row(cells, 'td')).join('') + '</tbody></table>'
 }
 
-export function useLessonWriting({ editor, canvas, id, title, notice }) {
+export function useLessonWriting({ editor, canvas, caret, id, title, notice }) {
   const mode = ref('')
   const action = ref(null)
   const instruction = ref('')
@@ -39,6 +41,7 @@ export function useLessonWriting({ editor, canvas, id, title, notice }) {
   let selectionKey = ''
   let dismissedSelection = ''
   let insertionPoint = null
+  let lastRect = null
 
   function selectionRect(collapsed) {
     const host = canvas.value
@@ -55,9 +58,11 @@ export function useLessonWriting({ editor, canvas, id, title, notice }) {
     return Array.from(host.querySelectorAll(selector)).filter((node) => node.getClientRects().length).at(-1)?.getBoundingClientRect() || null
   }
 
-  function position() {
+  function position(allowCached = false) {
     if (!mode.value || !canvas.value) return
-    const rect = selectionRect(mode.value === 'continue')
+    const measured = selectionRect(mode.value === 'continue')
+    if (measured?.height) lastRect = measured
+    const rect = measured?.height ? measured : allowCached === true ? lastRect : null
     const bounds = canvas.value.getBoundingClientRect()
     if (!rect || !rect.height) {
       anchor.value = null
@@ -67,10 +72,11 @@ export function useLessonWriting({ editor, canvas, id, title, notice }) {
       anchor.value = null
       return
     }
-    const width = Math.min(suggestion.value ? 440 : 310, bounds.width - 24)
+    const width = Math.min(suggestion.value ? 440 : action.value ? 310 : 176, bounds.width - 24)
     const left = Math.min(Math.max(12, rect.left - bounds.left), bounds.width - width - 12)
     const bottomSpace = bounds.top + bounds.height - rect.bottom
-    const above = bottomSpace < (suggestion.value ? 205 : 120) && rect.top - bounds.top > bottomSpace
+    const height = suggestion.value ? 260 : action.value ? 170 : writingOptions[mode.value].length * 36 + 12
+    const above = bottomSpace < height && rect.top - bounds.top > bottomSpace
     anchor.value = {
       left: left + 'px',
       width: width + 'px',
@@ -90,6 +96,7 @@ export function useLessonWriting({ editor, canvas, id, title, notice }) {
     error.value = ''
     anchor.value = null
     insertionPoint = null
+    lastRect = null
     dismissedSelection = selectionKey
     selectionKey = ''
     if (restoreFocus) editor.value?.focus()
@@ -159,6 +166,7 @@ export function useLessonWriting({ editor, canvas, id, title, notice }) {
   async function choose(option) {
     action.value = option
     error.value = ''
+    position(true)
     await nextTick()
     instructionInput.value?.focus({ preventScroll: true })
   }
@@ -166,7 +174,8 @@ export function useLessonWriting({ editor, canvas, id, title, notice }) {
   function context(instance) {
     if (mode.value === 'rewrite') return { before: instance.query({ type: 'selectedText' }), after: '' }
     const { to } = instance.snapshot().selection
-    const point = insertionPoint
+    // The semantic caret catches up with typing before the painted caret does.
+    const point = caret.value || insertionPoint
     const paragraphs = instance.query({ type: 'paragraphs', container: to.container })
     let index = paragraphs.findIndex(({ paraId }) => paraId && (paraId === to.paraId || paraId === point?.paragraphId))
     if (index < 0 && to.path?.length === 1) index = to.path[0]
