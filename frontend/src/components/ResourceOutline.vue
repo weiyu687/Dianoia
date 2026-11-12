@@ -19,7 +19,11 @@ function addChild(node) {
           <button type="button" class="button subtle icon-only" aria-label="删除章节" @click="props.nodes.splice(index, 1)"><X :size="14" /></button>
         </div>
       </div>
-      <button v-else class="outline-link" @click="emit('jump', node.start)"><ChevronRight :size="13" /><span>{{ node.title }}</span><small>{{ node.start }}</small></button>
+      <button v-else class="outline-link resource-outline-link" @click="emit('jump', node.start)">
+        <ChevronRight :size="13" aria-hidden="true" />
+        <span class="resource-outline-title">{{ node.title }}</span>
+        <small class="resource-outline-page">{{ node.start }}</small>
+      </button>
       <ResourceOutline v-if="node.children.length" :nodes="node.children" :editing="editing" :max="max" :depth="depth + 1" @jump="emit('jump', $event)" />
     </li>
   </ul>

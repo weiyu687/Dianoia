@@ -67,9 +67,11 @@ async function original() {
       <div class="document-layout">
         <form class="panel outline-panel stack" @submit.prevent="save">
           <label>资料名称<input v-model.trim="title" required maxlength="160"></label>
-          <div class="section-heading"><h2>章节目录</h2><button v-if="row.page_count" type="button" class="button subtle" @click="editing = !editing">{{ editing ? '收起编辑' : '校对目录' }}</button></div>
+          <div class="section-heading"><h2 id="resource-outline-heading">章节目录</h2><button v-if="row.page_count" type="button" class="button subtle" @click="editing = !editing">{{ editing ? '收起编辑' : '校对目录' }}</button></div>
           <p v-if="!nodes.length" class="muted">暂无目录。可以手动添加章节。</p>
-          <ResourceOutline :nodes="nodes" :editing="editing" :max="row.page_count" @jump="page = $event" />
+          <div v-else class="resource-outline-scroll" role="region" aria-labelledby="resource-outline-heading" tabindex="0">
+            <ResourceOutline :nodes="nodes" :editing="editing" :max="row.page_count" @jump="page = $event" />
+          </div>
           <button v-if="editing" class="button secondary" type="button" @click="nodes.push({ title: '', start: nodes.at(-1)?.end || 1, end: row.page_count, children: [] })"><Plus :size="16" /> 添加章节</button>
           <button class="button secondary" type="submit" :disabled="saving"><Save :size="16" /> 保存资料</button>
           <button v-if="row.status !== 'ready' && row.has_text" class="button primary" type="submit" value="ready" :disabled="saving">确认并入库</button>
