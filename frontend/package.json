@@ -8,10 +8,9 @@
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
-    "@tiptap/core": "^3.0.0",
-    "@tiptap/pm": "^3.0.0",
-    "@tiptap/starter-kit": "^3.0.0",
-    "@tiptap/vue-3": "^3.0.0",
+    "@docx-editor.dev/core": "2.37.0",
+    "@docx-editor.dev/i18n": "2.37.0",
+    "@docx-editor.dev/vue": "2.37.0",
     "lucide-vue-next": "^0.548.0",
     "pdfjs-dist": "5.4.624",
     "vue": "^3.5.0",

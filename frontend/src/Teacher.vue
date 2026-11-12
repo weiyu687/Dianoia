@@ -15,7 +15,7 @@ const navigationOpen = ref(false)
 const items = [
   { to: '/', label: '首页', icon: House, routes: ['home'] },
   { to: '/resources', label: '资料库', icon: LibraryBig, routes: ['library', 'resource'] },
-  { to: '/lessons', label: '教案', icon: BookOpen, routes: ['lessons', 'lesson'] },
+  { to: '/lessons', label: '教案', icon: BookOpen, routes: ['lessons', 'lesson', 'lessonTemplates'] },
   { to: '/agent', label: '教师 Agent', icon: MessageCircle, routes: ['agent'] },
 ]
 

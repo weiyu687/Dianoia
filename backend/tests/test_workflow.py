@@ -1,3 +1,4 @@
+import json
 import os
 import unittest
 from io import BytesIO
@@ -149,10 +150,81 @@ class WorkflowTest(unittest.TestCase):
                     self.assertIn("教学对象", model.call_args.args[1])
                     self.assertEqual(client.get(route).json()["revision"], 2)
 
+                private_template = self.check_lesson_templates(client, course, route)
                 second_teacher = login("t02", "teacher")
                 self.assertNotEqual(second_teacher["courses"][0]["id"], course)
                 self.assertEqual(client.get(route).status_code, 404)
                 self.assertEqual(client.get(f"/api/resources/{resource['id']}/file").status_code, 404)
+                self.assertEqual(client.get("/api/lesson-templates").json(), [])
+                self.assertEqual(client.get(f"/api/lesson-templates/{private_template}/preview").status_code, 404)
+                self.assertEqual(client.post("/api/lessons", json={
+                    "course_id": second_teacher["courses"][0]["id"], "title": "未授权模板",
+                    "template_id": private_template,
+                }).status_code, 404)
+
+    def check_lesson_templates(self, client, course, legacy_route):
+        templates = "/api/lesson-templates"
+        legacy = Document(BytesIO(client.get(f"{legacy_route}/document").raise_for_status().content))
+        self.assertTrue(any("计算机" in paragraph.text for paragraph in legacy.paragraphs))
+
+        def save_word(document):
+            buffer = BytesIO()
+            document.save(buffer)
+            return buffer.getvalue()
+
+        word = Document()
+        word.add_heading("教学设计", level=1)
+        word.add_table(rows=1, cols=1).cell(0, 0).text = "模板占位文字"
+        word.add_page_break()
+        word.add_paragraph("第二页正文")
+        original = save_word(word)
+
+        def upload():
+            return client.post(templates, data={"title": "学校模板"}, files={
+                "file": ("school.docx", original),
+            }).raise_for_status().json()
+
+        template = upload()
+        template_route = f"{templates}/{template['id']}"
+        self.assertEqual(client.patch(template_route, json={"title": "新名称"}).raise_for_status().json()["title"], "新名称")
+        blank = client.post("/api/lessons", json={
+            "course_id": course, "title": "空白教案", "blank_document": True,
+        }).raise_for_status().json()
+        blank_doc = Document(BytesIO(client.get(f"/api/lessons/{blank['id']}/document").raise_for_status().content))
+        self.assertEqual([paragraph.text for paragraph in blank_doc.paragraphs], [""])
+        def fill_generated_sections(_, prompt, structured):
+            self.assertTrue(structured)
+            expected = json.loads(prompt)["预期 JSON"]
+            expected["sections"][0]["content"] = "模型生成的教学内容"
+            return json.dumps(expected, ensure_ascii=False)
+
+        with patch("app.ai.generate", side_effect=fill_generated_sections):
+            generated = client.post("/api/ai/lessons", json={
+                "course_id": course, "title": "模型草稿",
+            }).raise_for_status().json()
+        generated_path = f"/api/lessons/{generated['id']}/document"
+        generated_doc = Document(BytesIO(client.get(generated_path).raise_for_status().content))
+        self.assertIn("模型生成的教学内容", [paragraph.text for paragraph in generated_doc.paragraphs])
+        plan = client.post("/api/lessons", json={
+            "course_id": course, "title": "模板教案", "template_id": template["id"],
+        }).raise_for_status().json()
+        path = f"/api/lessons/{plan['id']}"
+        self.assertEqual(client.get(f"{path}/document?revision=1").raise_for_status().content, original)
+        client.delete(template_route).raise_for_status()
+
+        word.tables[0].cell(0, 0).text = "已修改的表格"
+        edited = save_word(word)
+        data = {"title": "修改后", "revision": 1}
+        files = {"file": ("lesson.docx", edited)}
+        updated = client.put(f"{path}/document", data=data, files=files).raise_for_status().json()
+        self.assertEqual(updated["revision"], 2)
+        self.assertIn("已修改的表格", updated["sections"][0]["content"])
+        self.assertEqual(client.put(f"{path}/document", data=data, files=files).status_code, 409)
+        self.assertEqual(client.get(f"{path}/document?revision=1").status_code, 409)
+        self.assertEqual(client.get(f"{path}/export/docx").raise_for_status().content, edited)
+        duplicate = client.post(f"{path}/copy").raise_for_status().json()
+        self.assertEqual(client.get(f"/api/lessons/{duplicate['id']}/document").raise_for_status().content, edited)
+        return upload()["id"]
 
     def check_word_preview(self, client, teacher, course, converted_pdf, engine, files, resource_model, new_id):
         buffer = BytesIO()

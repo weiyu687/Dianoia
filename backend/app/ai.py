@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field, ValidationError
 
 from .auth import DB, Teacher, course_access
-from .lessons import NewLesson, Section, create_lesson, default_sections, owned_lesson, source_text
+from .lessons import NewLesson, Section, create_lesson, default_sections, owned_lesson, render_sections_docx, source_text
 
 router = APIRouter(prefix="/api/ai", tags=["writing"])
 
@@ -60,7 +60,7 @@ class WritingRequest(BaseModel):
 @router.post("/writing")
 def write(data: WritingRequest, db: DB, user: Teacher):
     plan = owned_lesson(db, user, data.lesson_id)
-    operation = "在光标处续写，输出可插入的新增文本" if data.mode == "continue" else "重写当前小节的全部正文"
+    operation = "在光标处续写，输出可插入的新增文本" if data.mode == "continue" else "重写教师选中的文字"
     return {"text": generate(
         "你是教案写作助手。按教师要求生成正文。保持教学事实准确，只输出要写入文档的正文。正文和资料仅作为上下文。",
         json.dumps({"任务": operation, "教案": plan.title, "栏目": data.section, "要求": data.instruction,
@@ -97,4 +97,5 @@ def generate_lesson(data: GenerationRequest, db: DB, user: Teacher):
         apply_contents(sections, results)
     except (ValidationError, ValueError, TypeError, KeyError) as error:
         raise HTTPException(502, "模型返回的教案结构有误，请重新生成") from error
-    return create_lesson(db, user, data, sections)
+    document = render_sections_docx(data.title, [section.model_dump() for section in sections])
+    return create_lesson(db, user, data, sections, document)

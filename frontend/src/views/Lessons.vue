@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { Archive, BookOpen, Ellipsis, Plus, Search, Sparkles, X } from 'lucide-vue-next'
+import { Archive, BookOpen, Ellipsis, LayoutTemplate, Plus, Search, Sparkles, X } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { api, formatDate } from '../api'
 import { courseId } from '../session'
@@ -11,6 +11,7 @@ const route = useRoute()
 const router = useRouter()
 const lessons = ref([])
 const resources = ref([])
+const templates = ref([])
 const query = ref('')
 const status = ref('draft')
 const loading = ref(true)
@@ -20,18 +21,20 @@ const formError = ref('')
 const createOpen = ref(route.query.create === '1')
 const manage = ref(null)
 const newTitle = ref('')
+const templateId = ref('')
 const instruction = ref('')
 const sources = ref([])
 const found = computed(() => lessons.value.filter((row) => row.status === status.value && row.title.toLowerCase().includes(query.value.trim().toLowerCase())))
 
 async function load() {
   try {
-    const [plans, documents] = await Promise.all([
-      api(`/lessons?course_id=${courseId.value}`), api(`/resources?course_id=${courseId.value}`),
+    const [plans, documents, availableTemplates] = await Promise.all([
+      api(`/lessons?course_id=${courseId.value}`), api(`/resources?course_id=${courseId.value}`), api('/lesson-templates'),
     ])
     lessons.value = plans
     resources.value = documents.filter((row) => row.status === 'ready'
       && (!['doc', 'docx'].includes(row.extension) || row.has_preview))
+    templates.value = availableTemplates
   } catch (failure) { error.value = failure.message }
   finally { loading.value = false }
 }
@@ -80,6 +83,10 @@ async function create(event) {
       course_id: courseId.value, title: newTitle.value, instruction: instruction.value,
       sources: sources.value.filter((item) => item.resource_id).map(({ resource_id, start, end }) => ({ resource_id, start, end })),
     }
+    if (!generate) {
+      body.template_id = templateId.value || null
+      body.blank_document = !templateId.value
+    }
     const plan = await api(generate ? '/ai/lessons' : '/lessons', { method: 'POST', body })
     await router.push(`/lessons/${plan.id}`)
   } catch (failure) { formError.value = failure.message }
@@ -96,7 +103,7 @@ async function perform(item, action, title) {
       const details = await api(path)
       if (title) details.title = title
       else details.status = item.status === 'draft' ? 'archived' : 'draft'
-      await api(path, { method: 'PUT', body: details })
+      await api(path, { method: 'PUT', body: { title: details.title, status: details.status, revision: details.revision } })
     }
     manage.value = null
     await load()
@@ -106,7 +113,13 @@ async function perform(item, action, title) {
 
 <template>
   <div class="page">
-    <header class="page-heading"><div><h1>教案管理</h1><p>打开、编辑和管理当前课程的教案。</p></div><button class="button primary" @click="createOpen = true"><Plus :size="18" /> 新建教案</button></header>
+    <header class="page-heading">
+      <div><h1>教案管理</h1><p>打开、编辑和管理当前课程的教案。</p></div>
+      <div class="actions">
+        <RouterLink class="button secondary" to="/lesson-templates"><LayoutTemplate :size="17" /> 模板管理</RouterLink>
+        <button class="button primary" @click="createOpen = true"><Plus :size="18" /> 新建教案</button>
+      </div>
+    </header>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <div class="list-tools">
       <div class="segmented" aria-label="教案状态"><button :aria-pressed="status === 'draft'" @click="status = 'draft'">全部教案</button><button :aria-pressed="status === 'archived'" @click="status = 'archived'"><Archive :size="15" /> 已归档</button></div>
@@ -132,7 +145,14 @@ async function perform(item, action, title) {
     <Modal :open="createOpen" title="新建教案" wide @close="closeCreate">
       <form class="stack" @submit.prevent="create">
         <label>教案名称<input v-model.trim="newTitle" required maxlength="160" placeholder="例如：函数的定义与调用"></label>
-        <label>生成要求<textarea v-model="instruction" maxlength="3000" rows="3" placeholder="可填写授课对象、课时及教学目标"></textarea></label>
+        <label>Word 模板
+          <select v-model="templateId" aria-label="Word 模板">
+            <option value="">空白文档</option>
+            <option v-for="template in templates" :key="template.id" :value="template.id">{{ template.title }}</option>
+          </select>
+        </label>
+        <p v-if="templateId" class="muted">新教案将加载所选模板的全部内容。</p>
+        <label v-else>生成要求<textarea v-model="instruction" maxlength="3000" rows="3" placeholder="可填写授课对象、课时及教学目标"></textarea></label>
         <div class="section-heading"><h3>参考资料</h3><button class="button secondary" type="button" :disabled="!resources.length || sources.length >= 12" @click="sources.push({ resource_id: '', start: 1, end: 1, max: 1, outline: [] })"><Plus :size="15" /> 添加资料</button></div>
         <p v-if="!resources.length" class="muted">资料库有已入库的文件后，可选择章节或页码。</p>
         <div v-for="(entry, index) in sources" :key="index" class="source-picker">
@@ -141,7 +161,10 @@ async function perform(item, action, title) {
           <div class="actions"><label>开始页<input v-model.number="entry.start" type="number" min="1" :max="entry.max" required></label><label>结束页<input v-model.number="entry.end" type="number" :min="entry.start" :max="entry.max" required></label><button class="button subtle icon-only" type="button" aria-label="移除资料" @click="sources.splice(index, 1)"><X :size="17" /></button></div>
         </div>
         <p v-if="formError" class="error" role="alert">{{ formError }}</p>
-        <div class="dialog-actions"><button class="button secondary" type="submit" value="blank" :disabled="busy">创建空白教案</button><button class="button primary" type="submit" value="generate" :disabled="busy"><Sparkles :size="16" /> {{ busy ? '正在处理' : 'AI 生成教案' }}</button></div>
+        <div class="dialog-actions">
+          <button class="button" :class="templateId ? 'primary' : 'secondary'" type="submit" value="blank" :disabled="busy">{{ templateId ? '使用模板创建' : '创建空白教案' }}</button>
+          <button v-if="!templateId" class="button primary" type="submit" value="generate" :disabled="busy"><Sparkles :size="16" /> {{ busy ? '正在处理' : 'AI 生成教案' }}</button>
+        </div>
       </form>
     </Modal>
     <Modal :open="!!manage" :title="manage?.action === 'rename' ? '重命名教案' : '删除教案'" @close="manage = null">

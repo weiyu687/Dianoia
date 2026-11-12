@@ -27,7 +27,7 @@ export default defineConfig({
       for (const folder of pdfFolders) cpSync(resolve(pdfAssets, folder), resolve(target, folder), { recursive: true })
     },
   }],
-  optimizeDeps: { include: ['pdfjs-dist/legacy/build/pdf.mjs', '@tiptap/vue-3', '@tiptap/starter-kit', '@tiptap/pm/state', '@tiptap/pm/view'] },
+  optimizeDeps: { include: ['pdfjs-dist/legacy/build/pdf.mjs', '@docx-editor.dev/vue', '@docx-editor.dev/i18n'] },
   server: { proxy },
   preview: { proxy },
   build: {

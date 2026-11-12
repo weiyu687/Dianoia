@@ -1,4 +1,3 @@
-import './compat'
 import { createApp } from 'vue'
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { applyTheme } from './session'
@@ -17,6 +16,7 @@ const router = createRouter({
     { path: '/resources/:id', name: 'resource', component: () => import('./views/Resource.vue') },
     { path: '/lessons', name: 'lessons', component: Lessons },
     { path: '/lessons/:id', name: 'lesson', component: () => import('./views/LessonEditor.vue') },
+    { path: '/lesson-templates', name: 'lessonTemplates', component: () => import('./views/LessonTemplates.vue') },
     { path: '/agent', name: 'agent', component: () => import('./views/Agent.vue') },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
