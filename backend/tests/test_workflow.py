@@ -5,6 +5,7 @@ from base64 import b64decode
 from io import BytesIO
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
+from uuid import uuid4
 
 from docx import Document
 from docx.oxml.ns import qn
@@ -222,6 +223,12 @@ class WorkflowTest(unittest.TestCase):
         generated_path = f"/api/lessons/{generated['id']}/document"
         generated_doc = Document(BytesIO(client.get(generated_path).raise_for_status().content))
         self.assertIn("模型生成的教学内容", [paragraph.text for paragraph in generated_doc.paragraphs])
+        for name, family in (("Normal", "宋体"), ("Normal Table", "宋体"), ("Title", "黑体"),
+                             ("Heading 1", "黑体"), ("Heading 2", "黑体")):
+            fonts = generated_doc.styles[name].element.xpath("./w:rPr/w:rFonts")[0]
+            self.assertEqual([fonts.get(qn(f"w:{slot}")) for slot in ("ascii", "hAnsi", "eastAsia", "cs")], [family] * 4)
+            self.assertIsNone(fonts.get(qn("w:eastAsiaTheme")))
+        self.assertEqual(generated_doc.settings.element.xpath("./w:themeFontLang")[0].get(qn("w:eastAsia")), "zh-CN")
         self.assertEqual(generated_doc.tables[0].cell(1, 1).text, "A|B")
         self.assertTrue(generated_doc.tables[0]._tbl.xpath("./w:tblPr/w:tblBorders/w:insideH"))
         marked = Document()
@@ -306,7 +313,27 @@ class WorkflowTest(unittest.TestCase):
         self.assertEqual(client.put(f"{path}/document", data=data, files=files).status_code, 409)
         self.assertEqual(client.get(f"{path}/document?revision=1").status_code, 409)
         self.assertEqual(client.get(f"{path}/export/docx").raise_for_status().content, edited)
-        duplicate = client.post(f"{path}/copy").raise_for_status().json()
+        list_path = f"/api/lessons?course_id={course}"
+        count_before = len(client.get(list_path).raise_for_status().json())
+        status_path = f"{path}/status"
+        archived = client.patch(status_path, json={"status": "archived"}).raise_for_status().json()
+        self.assertEqual((archived["id"], archived["status"]), (plan["id"], "archived"))
+        renamed = client.put(path, json={"title": "已归档教案", "revision": archived["revision"]}).raise_for_status().json()
+        self.assertEqual(renamed["status"], "archived")
+        restored = client.patch(status_path, json={"status": "draft"}).raise_for_status().json()
+        self.assertEqual((restored["id"], restored["status"]), (plan["id"], "draft"))
+        retry = client.patch(status_path, json={"status": "draft"}).raise_for_status().json()
+        self.assertEqual(retry["revision"], restored["revision"])
+        self.assertEqual(len(client.get(list_path).raise_for_status().json()), count_before)
+        self.assertEqual(client.get(f"{path}/document").raise_for_status().content, edited)
+
+        key = {"Idempotency-Key": str(uuid4())}
+        duplicate = client.post(f"{path}/copy", headers=key).raise_for_status().json()
+        self.assertNotEqual(duplicate["id"], plan["id"])
+        for _ in range(2):
+            retried = client.post(f"{path}/copy", headers=key).raise_for_status().json()
+            self.assertEqual(retried["id"], duplicate["id"])
+        self.assertEqual(len(client.get(list_path).raise_for_status().json()), count_before + 1)
         self.assertEqual(client.get(f"/api/lessons/{duplicate['id']}/document").raise_for_status().content, edited)
         return upload()["id"]
 

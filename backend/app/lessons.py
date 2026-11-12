@@ -6,11 +6,13 @@ from io import BytesIO
 from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import quote
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from docx import Document
+from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.table import Table
-from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile
+from fastapi import APIRouter, File, Form, Header, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field, StringConstraints
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.pdfbase import pdfmetrics
@@ -18,6 +20,7 @@ from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 
 from .auth import DB, Teacher, course_access
 from .documents import WORD_EXTENSIONS
@@ -29,6 +32,7 @@ from .word import DOCX_MIME, convert_word, read_word_upload, word_pdf
 
 router = APIRouter(prefix="/api/lessons", tags=["lessons"])
 Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=160)]
+LessonStatus = Literal["draft", "archived"]
 WORD_HEADING = re.compile(r"(?:Heading|标题)\s*([1-9])$", re.IGNORECASE)
 
 
@@ -57,7 +61,11 @@ class LessonUpdate(BaseModel):
     title: Title
     revision: int = Field(ge=1)
     sections: list[Section] | None = Field(default=None, min_length=1, max_length=30)
-    status: Literal["draft", "archived"] = "draft"
+    status: LessonStatus | None = None
+
+
+class LessonStatusUpdate(BaseModel):
+    status: LessonStatus
 
 
 def default_sections():
@@ -130,8 +138,9 @@ def lesson_sources(db, user, course_id, selections, *, skip_unavailable=False):
     return context, references, unavailable
 
 
-def create_lesson(db, user, data, sections, docx=None):
+def create_lesson(db, user, data, sections, docx=None, *, lesson_id=None):
     row = Lesson(
+        id=lesson_id or identifier(),
         owner_id=user.id, course_id=data.course_id, title=data.title,
         sections=[section.model_dump() for section in sections],
         sources=[source.model_dump() for source in data.sources],
@@ -174,7 +183,9 @@ def get_lesson(lesson_id: str, db: DB, user: Teacher):
 @router.put("/{lesson_id}")
 def save_lesson(lesson_id: str, data: LessonUpdate, db: DB, user: Teacher):
     row = owned_lesson(db, user, lesson_id)
-    fields = {"title": data.title, "status": data.status}
+    fields = {"title": data.title}
+    if data.status is not None:
+        fields["status"] = data.status
     if data.sections is not None and not db.get(LessonDocument, row.id):
         sections = [section.model_dump() for section in data.sections]
         structure = list(walk_sections(sections))
@@ -185,6 +196,16 @@ def save_lesson(lesson_id: str, data: LessonUpdate, db: DB, user: Teacher):
     update_revision(db, row.id, data.revision, **fields)
     db.commit()
     return lesson_view(row, detail=True)
+
+
+@router.patch("/{lesson_id}/status")
+def change_lesson_status(lesson_id: str, data: LessonStatusUpdate, db: DB, user: Teacher):
+    row = owned_lesson(db, user, lesson_id)
+    db.execute(update(Lesson).where(Lesson.id == row.id, Lesson.status != data.status).values(
+        status=data.status, revision=Lesson.revision + 1, updated_at=now(),
+    ))
+    db.commit()
+    return lesson_view(row)
 
 
 def update_revision(db, lesson_id, revision, **fields):
@@ -231,12 +252,31 @@ def save_lesson_document(
 
 
 @router.post("/{lesson_id}/copy", status_code=201)
-def copy_lesson(lesson_id: str, db: DB, user: Teacher):
+def copy_lesson(
+    lesson_id: str, db: DB, user: Teacher,
+    operation: Annotated[UUID | None, Header(alias="Idempotency-Key")] = None,
+):
     row = owned_lesson(db, user, lesson_id)
+    copy_id = uuid5(NAMESPACE_URL, f"dianoia:lesson-copy:{user.id}:{row.id}:{operation}").hex if operation else None
+
+    def completed_copy():
+        copy = db.get(Lesson, copy_id)
+        if copy and copy.owner_id == user.id and copy.course_id == row.course_id:
+            return lesson_view(copy, detail=True)
+        return None
+
+    if copy_id and (completed := completed_copy()):
+        return completed
     data = NewLesson(course_id=row.course_id, title=f"{row.title[:154]}（副本）", sources=row.sources)
     word = db.get(LessonDocument, row.id)
-    return create_lesson(db, user, data, [Section.model_validate(section) for section in row.sections],
-                         word.content if word else None)
+    try:
+        return create_lesson(db, user, data, [Section.model_validate(section) for section in row.sections],
+                             word.content if word else None, lesson_id=copy_id)
+    except IntegrityError:
+        db.rollback()
+        if copy_id and (completed := completed_copy()):
+            return completed
+        raise
 
 
 @router.delete("/{lesson_id}", status_code=204)
@@ -268,9 +308,30 @@ def add_lesson_sections(document, title, sections):
 
 def chinese_lesson_document():
     document = Document()
-    fonts = document.styles["Normal"].element.get_or_add_rPr().get_or_add_rFonts()
-    fonts.set(qn("w:eastAsia"), "宋体")
+    for default in document.styles.element.xpath("./w:docDefaults/w:rPrDefault/w:rPr"):
+        set_chinese_typeface(default, "宋体")
+    for name in ("Normal", "Normal Table"):
+        set_chinese_typeface(document.styles[name].element.get_or_add_rPr(), "宋体")
+    for name in ("Title", *(f"Heading {level}" for level in range(1, 10))):
+        set_chinese_typeface(document.styles[name].element.get_or_add_rPr(), "黑体")
+    for theme in document.settings.element.xpath("./w:themeFontLang"):
+        theme.set(qn("w:val"), "zh-CN")
+        theme.set(qn("w:eastAsia"), "zh-CN")
     return document
+
+
+def set_chinese_typeface(properties, family):
+    fonts = properties.get_or_add_rFonts()
+    for slot in ("asciiTheme", "hAnsiTheme", "eastAsiaTheme", "cstheme"):
+        fonts.attrib.pop(qn(f"w:{slot}"), None)
+    for slot in ("ascii", "hAnsi", "eastAsia", "cs"):
+        fonts.set(qn(f"w:{slot}"), family)
+    language = properties.find(qn("w:lang"))
+    if language is None:
+        language = OxmlElement("w:lang")
+        properties.insert_element_before(language, "w:eastAsianLayout", "w:specVanish", "w:oMath")
+    language.set(qn("w:val"), "zh-CN")
+    language.set(qn("w:eastAsia"), "zh-CN")
 
 
 def serialize_docx(document):

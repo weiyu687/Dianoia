@@ -18,8 +18,11 @@ const loading = ref(true)
 const busy = ref(false)
 const error = ref('')
 const formError = ref('')
+const message = ref('')
 const createOpen = ref(route.query.create === '1')
 const manage = ref(null)
+const openMenu = ref(null)
+const pendingAction = ref(false)
 const newTitle = ref('')
 const templateId = ref('')
 const instruction = ref('')
@@ -93,26 +96,58 @@ async function create(event) {
   finally { busy.value = false }
 }
 
+function showStatus(next) {
+  status.value = next
+  openMenu.value = null
+  message.value = ''
+}
+
+function toggleMenu(id) {
+  if (!pendingAction.value) openMenu.value = openMenu.value === id ? null : id
+}
+
+function closeOutside(event) {
+  if (!event.target.closest('.row-menu')) openMenu.value = null
+}
+
 async function perform(item, action, title) {
+  if (pendingAction.value) return
+  pendingAction.value = true
+  openMenu.value = null
   error.value = ''
+  message.value = ''
   try {
     const path = `/lessons/${item.id}`
-    if (action === 'delete') await api(path, { method: 'DELETE' })
-    else if (action === 'copy') await api(`${path}/copy`, { method: 'POST' })
-    else {
+    let updated
+    if (action === 'delete') {
+      await api(path, { method: 'DELETE' })
+      lessons.value = lessons.value.filter((lesson) => lesson.id !== item.id)
+      message.value = '教案已删除'
+    } else if (action === 'copy') {
+      updated = await api(`${path}/copy`, {
+        method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() },
+      })
+      message.value = '已在当前教案中创建一份副本'
+    } else if (action === 'rename') {
       const details = await api(path)
-      if (title) details.title = title
-      else details.status = item.status === 'draft' ? 'archived' : 'draft'
-      await api(path, { method: 'PUT', body: { title: details.title, status: details.status, revision: details.revision } })
+      updated = await api(path, { method: 'PUT', body: { title, revision: details.revision } })
+      message.value = '教案已重命名'
+    } else {
+      const next = action === 'archive' ? 'archived' : 'draft'
+      updated = await api(`${path}/status`, { method: 'PATCH', body: { status: next } })
+      message.value = next === 'archived' ? '已移至「已归档」' : '原教案已恢复到「当前教案」'
     }
+    if (updated) lessons.value = [updated, ...lessons.value.filter((lesson) => lesson.id !== updated.id)]
+  } catch (failure) { error.value = failure.message }
+  finally {
     manage.value = null
-    await load()
-  } catch (failure) { error.value = failure.message; manage.value = null }
+    pendingAction.value = false
+  }
 }
 </script>
 
 <template>
-  <div class="page">
+  <div class="page" @click="closeOutside">
     <header class="page-heading">
       <div><h1>教案管理</h1><p>打开、编辑和管理当前课程的教案。</p></div>
       <div class="actions">
@@ -121,8 +156,9 @@ async function perform(item, action, title) {
       </div>
     </header>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
+    <p v-if="message" class="success" role="status">{{ message }}</p>
     <div class="list-tools">
-      <div class="segmented" aria-label="教案状态"><button :aria-pressed="status === 'draft'" @click="status = 'draft'">全部教案</button><button :aria-pressed="status === 'archived'" @click="status = 'archived'"><Archive :size="15" /> 已归档</button></div>
+      <div class="segmented" aria-label="教案状态"><button :aria-pressed="status === 'draft'" @click="showStatus('draft')">当前教案</button><button :aria-pressed="status === 'archived'" @click="showStatus('archived')"><Archive :size="15" /> 已归档</button></div>
       <label class="search"><Search :size="17" /><input v-model="query" type="search" aria-label="搜索教案" placeholder="搜索教案"></label>
     </div>
     <div v-if="loading" class="empty-state" role="status">正在加载教案</div>
@@ -131,15 +167,20 @@ async function perform(item, action, title) {
         <tbody><tr v-for="item in found" :key="item.id">
           <td><RouterLink class="file-title" :to="`/lessons/${item.id}`"><span class="file-icon lesson-icon"><BookOpen :size="18" /></span><strong>{{ item.title }}</strong></RouterLink></td>
           <td><span class="status-tag">{{ item.status === 'draft' ? '草稿' : '已归档' }}</span></td><td>v{{ item.revision }}</td><td>{{ formatDate(item.updated_at) }}</td>
-          <td><details class="row-menu"><summary aria-label="教案操作"><Ellipsis :size="19" /></summary><div>
-            <button @click="manage = { action: 'rename', item, title: item.title }">重命名</button><button @click="perform(item, 'copy')">复制</button>
-            <button @click="perform(item, 'archive')">{{ item.status === 'draft' ? '归档' : '恢复' }}</button>
-            <button class="danger-text" @click="manage = { action: 'delete', item }">删除</button>
-          </div></details></td>
+          <td><details class="row-menu lesson-row-menu" :open="openMenu === item.id" @keydown.esc="openMenu = null">
+            <summary :aria-label="`教案操作 ${item.title}`" :aria-disabled="pendingAction" @click.prevent="toggleMenu(item.id)"><Ellipsis :size="19" /></summary>
+            <div>
+              <button v-if="item.status === 'draft'" type="button" :disabled="pendingAction" @click="perform(item, 'archive')">归档</button>
+              <button v-else type="button" :disabled="pendingAction" @click="perform(item, 'restore')">恢复到当前教案</button>
+              <button type="button" :disabled="pendingAction" @click="openMenu = null; manage = { action: 'rename', item, title: item.title }">重命名</button>
+              <button type="button" :disabled="pendingAction" @click="perform(item, 'copy')">复制为新教案</button>
+              <button class="danger-text" type="button" :disabled="pendingAction" @click="openMenu = null; manage = { action: 'delete', item }">删除</button>
+            </div>
+          </details></td>
         </tr></tbody>
       </table>
     </div>
-    <Empty v-else :title="query ? '没有找到匹配的教案' : status === 'archived' ? '暂无归档教案' : '还没有教案'" :detail="!query && status === 'draft' ? '可以从空白开始，也可以选择资料用 AI 生成草稿。' : ''">
+    <Empty v-else :title="query ? '没有找到匹配的教案' : status === 'archived' ? '暂无归档教案' : '还没有教案'" :detail="!query && status === 'draft' ? '可以从空白开始，也可以选择资料用 AI 生成草稿。' : !query ? '归档教案可恢复到当前教案列表。' : ''">
       <button v-if="!query && status === 'draft'" class="button secondary" @click="createOpen = true"><Plus :size="16" /> 新建教案</button>
     </Empty>
     <Modal :open="createOpen" title="新建教案" wide @close="closeCreate">
@@ -167,11 +208,11 @@ async function perform(item, action, title) {
         </div>
       </form>
     </Modal>
-    <Modal :open="!!manage" :title="manage?.action === 'rename' ? '重命名教案' : '删除教案'" @close="manage = null">
+    <Modal :open="!!manage" :title="manage?.action === 'rename' ? '重命名教案' : '删除教案'" @close="!pendingAction && (manage = null)">
       <form class="stack" @submit.prevent="perform(manage.item, manage.action, manage.title)">
         <label v-if="manage?.action === 'rename'">教案名称<input v-model.trim="manage.title" required maxlength="160"></label>
         <p v-else>删除「{{ manage?.item.title }}」？</p>
-        <div class="dialog-actions"><button type="button" class="button secondary" @click="manage = null">取消</button><button type="submit" class="button" :class="manage?.action === 'rename' ? 'primary' : 'danger'">{{ manage?.action === 'rename' ? '保存' : '删除教案' }}</button></div>
+        <div class="dialog-actions"><button type="button" class="button secondary" :disabled="pendingAction" @click="manage = null">取消</button><button type="submit" class="button" :class="manage?.action === 'rename' ? 'primary' : 'danger'" :disabled="pendingAction">{{ manage?.action === 'rename' ? '保存' : '删除教案' }}</button></div>
       </form>
     </Modal>
   </div>

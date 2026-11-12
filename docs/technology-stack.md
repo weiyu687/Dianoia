@@ -39,6 +39,8 @@
 
 模板填充沿用目标段落的字体、字号与行距。编辑器内采纳多段文字或表格时，后端用 python-docx 生成含中文字体字段的 Word 片段，通过固定版本 DOCX Editor 的富文本粘贴写入。升级编辑器时验证片段粘贴、字体与段落格式。[DOCX 富文本粘贴与格式兼容](https://www.docx-editor.dev/docs/2.x/docx-fidelity)
 
+空白 DOCX 和无模板生成的教案使用显式中文字体与 `zh-CN` 文档语言。归档和恢复使用状态接口更新同一教案。复制接口使用 UUID 请求键识别同一次复制的重试。
+
 ## 待验证和待选型
 
 - 资料向量检索的候选为 PostgreSQL + pgvector 与 Qwen3-Embedding。以真实中文课程样本比较证据召回、章节切分与引用页码后再确认。

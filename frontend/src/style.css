@@ -160,6 +160,7 @@ h3 { font-size: 15px; font-weight: 650; }
 .row-menu > div { position: absolute; z-index: 3; top: 100%; right: 0; min-width: 146px; padding: 5px; background: var(--raised); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 25px var(--shadow); }
 .row-menu > div > * { display: flex; justify-content: space-between; gap: 5px; align-items: center; background: transparent; border: 0; border-radius: 6px; padding: 8px 9px; width: 100%; text-align: left; white-space: nowrap; }
 .row-menu > div > *:hover { background: var(--hover); }
+.lesson-row-menu > div { top: 0; right: calc(100% + 8px); }
 .empty-state { display: grid; justify-items: center; gap: 10px; text-align: center; min-height: 230px; align-content: center; padding: 22px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; }
 .empty-state p { color: var(--muted); }
 .segmented { display: inline-flex; gap: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: 9px; padding: 3px; }
