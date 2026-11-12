@@ -1,6 +1,6 @@
 <script setup>
-import { onMounted, ref, watch } from 'vue'
-import { ArrowLeft, Download, Plus, Save } from 'lucide-vue-next'
+import { computed, onMounted, ref, watch } from 'vue'
+import { ArrowLeft, Download, FileText, Plus, Save } from 'lucide-vue-next'
 import { useRoute } from 'vue-router'
 import { api, download, formatSize } from '../api'
 import ResourceOutline from '../components/ResourceOutline.vue'
@@ -13,13 +13,15 @@ const title = ref('')
 const nodes = ref([])
 const editing = ref(false)
 const saving = ref(false)
+const converting = ref(false)
 const error = ref('')
 const message = ref('')
 const pageText = ref('')
+const needsWordPreview = computed(() => ['doc', 'docx'].includes(row.value?.extension) && !row.value?.has_preview)
 
 async function getText() {
   pageText.value = ''
-  if (!row.value?.has_text || row.value.has_preview) return
+  if (!row.value?.has_text || row.value.has_preview || needsWordPreview.value) return
   const number = page.value
   try {
     const content = await api(`/resources/${id}/pages/${number}`)
@@ -33,16 +35,32 @@ onMounted(async () => {
     row.value = await api(`/resources/${id}`)
     title.value = row.value.title
     nodes.value = row.value.outline
-    await getText()
+    if (needsWordPreview.value) await convertWord()
+    else await getText()
   } catch (failure) { error.value = failure.message }
 })
+
+async function convertWord() {
+  if (converting.value) return
+  converting.value = true
+  error.value = ''
+  try {
+    row.value = await api(`/resources/${id}/process`, { method: 'POST' })
+    nodes.value = row.value.outline
+    page.value = 1
+    message.value = nodes.value.length
+      ? '已生成 PDF 预览，请校对目录。'
+      : '已生成 PDF 预览。未找到目录，可以手动添加章节。'
+  } catch (failure) { error.value = failure.message }
+  finally { converting.value = false }
+}
 
 async function save(event) {
   saving.value = true
   message.value = ''
   error.value = ''
   try {
-    const status = event.submitter?.value === 'ready' ? 'ready' : row.value.status
+    const status = event.submitter?.value === 'ready' ? 'ready' : undefined
     row.value = await api(`/resources/${id}`, { method: 'PATCH', body: { title: title.value, outline: nodes.value, status } })
     nodes.value = row.value.outline
     editing.value = false
@@ -68,16 +86,21 @@ async function original() {
         <form class="panel outline-panel stack" @submit.prevent="save">
           <label>资料名称<input v-model.trim="title" required maxlength="160"></label>
           <div class="section-heading"><h2 id="resource-outline-heading">章节目录</h2><button v-if="row.page_count" type="button" class="button subtle" @click="editing = !editing">{{ editing ? '收起编辑' : '校对目录' }}</button></div>
-          <p v-if="!nodes.length" class="muted">暂无目录。可以手动添加章节。</p>
+          <p v-if="!nodes.length" class="muted">{{ needsWordPreview ? '转换为 PDF 后可校对目录。' : '暂无目录。可以手动添加章节。' }}</p>
           <div v-else class="resource-outline-scroll" role="region" aria-labelledby="resource-outline-heading" tabindex="0">
             <ResourceOutline :nodes="nodes" :editing="editing" :max="row.page_count" @jump="page = $event" />
           </div>
           <button v-if="editing" class="button secondary" type="button" @click="nodes.push({ title: '', start: nodes.at(-1)?.end || 1, end: row.page_count, children: [] })"><Plus :size="16" /> 添加章节</button>
-          <button class="button secondary" type="submit" :disabled="saving"><Save :size="16" /> 保存资料</button>
-          <button v-if="row.status !== 'ready' && row.has_text" class="button primary" type="submit" value="ready" :disabled="saving">确认并入库</button>
-          <p v-if="!row.has_text" class="muted">没有可用正文。扫描页需要带文本层的文件。</p>
+          <button class="button secondary" type="submit" :disabled="saving || converting"><Save :size="16" /> 保存资料</button>
+          <button v-if="row.status !== 'ready' && row.has_text && !needsWordPreview" class="button primary" type="submit" value="ready" :disabled="saving">确认并入库</button>
+          <p v-if="!row.has_text && !needsWordPreview" class="muted">没有可用正文。扫描页需要带文本层的文件。</p>
         </form>
         <PdfViewer v-if="row.has_preview" :src="`/api/resources/${id}/preview`" v-model:page="page" />
+        <div v-else-if="needsWordPreview" class="panel text-preview stack">
+          <div class="section-heading"><h2><FileText :size="18" /> PDF 预览</h2></div>
+          <p v-if="converting" class="muted" role="status">正在将原始 Word 文件转换为 PDF…</p>
+          <button v-else class="button secondary" type="button" @click="convertWord">重新转换 PDF</button>
+        </div>
         <div v-else class="panel text-preview">
           <header class="section-heading"><h2>提取文本</h2><input v-if="row.page_count > 1" v-model.number="page" type="number" aria-label="文本页码" min="1" :max="row.page_count"></header>
           <p class="muted">PDF 版式预览需要服务器配置 LibreOffice。</p>

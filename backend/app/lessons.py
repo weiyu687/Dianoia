@@ -20,7 +20,7 @@ from sqlalchemy import select, update
 from typing import Annotated
 
 from .auth import DB, Teacher, course_access
-from .documents import convert_with_office
+from .documents import WORD_EXTENSIONS, convert_with_office
 from .models import Lesson, identifier, now
 from .resources import owned_resource
 
@@ -94,6 +94,8 @@ def source_text(db, user, course_id, selections):
     chunks = []
     for source in selections:
         resource = owned_resource(db, user, source.resource_id)
+        if resource.extension in WORD_EXTENSIONS and not resource.has_preview:
+            raise HTTPException(409, "请先在资料库中将 Word 资料转换为 PDF")
         if (resource.course_id != course_id or resource.status != "ready"
                 or not 1 <= source.start <= source.end <= len(resource.pages)):
             raise HTTPException(422, "请使用当前课程已入库的资料并核对页码")

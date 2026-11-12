@@ -43,6 +43,8 @@ npm run dev
 | `DIANOIA_SOFFICE` | LibreOffice 可执行文件路径，用于 Word 和 PPTX 的 PDF 预览、旧 DOC 文本提取和 DOC 导出 |
 | `DIANOIA_PDF_FONT` | 可选，PDF 生成时嵌入的中文 TrueType 字体路径 |
 
+Word 资料上传需要 LibreOffice Writer。系统会查找 PATH、Windows 默认安装目录及数据目录下的 `tools/LibreOffice/program`，也可以通过 `DIANOIA_SOFFICE` 指定可执行文件。Word 统一转换为 PDF 后预览、读取书签和逐页提取正文。重新打开此前仅保存了文本的 Word 资料时，系统会用原件补做转换，保留原资料记录。
+
 现有根目录 `.env` 中的 `MODEL_API_URL`、`MODEL_NAME` 和 `MODEL_API_KEY` 也可继续使用。优先采用对应的 `DIANOIA_*` 配置。
 
 生产部署应让前端与 `/api` 同源，并用 TLS、私有持久卷和 PostgreSQL。当前迭代先验证单校工作流，部署前需要完成数据库迁移、备份、文件处理隔离和学校真实账号接入。

@@ -4,10 +4,12 @@ from io import BytesIO
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from docx import Document
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
 from pypdf import PdfReader
 from reportlab.pdfgen.canvas import Canvas
+from sqlalchemy.orm import Session
 
 
 class WorkflowTest(unittest.TestCase):
@@ -19,7 +21,10 @@ class WorkflowTest(unittest.TestCase):
             "DIANOIA_SECURE_COOKIE": "false",
         }):
             from app.admin import SHEETS
+            from app.db import engine
+            from app.documents import FILES
             from app.main import app
+            from app.models import Resource, identifier
             from app.seed import main as seed
 
             seed()
@@ -84,6 +89,7 @@ class WorkflowTest(unittest.TestCase):
                 canvas.addOutlineEntry("Isolation", "second", level=1)
                 canvas.drawString(40, 500, "Repeatable read is an isolation level.")
                 canvas.save()
+                self.check_word_preview(client, teacher, course, file.getvalue(), engine, FILES, Resource, identifier)
                 resource = client.post("/api/resources", data={"course_id": course}, files={
                     "file": ("transactions.pdf", file.getvalue(), "application/pdf"),
                 }).raise_for_status().json()
@@ -119,6 +125,54 @@ class WorkflowTest(unittest.TestCase):
                 self.assertNotEqual(second_teacher["courses"][0]["id"], course)
                 self.assertEqual(client.get(route).status_code, 404)
                 self.assertEqual(client.get(f"/api/resources/{resource['id']}/file").status_code, 404)
+
+    def check_word_preview(self, client, teacher, course, converted_pdf, engine, files, resource_model, new_id):
+        buffer = BytesIO()
+        word = Document()
+        word.add_heading("Transactions", level=1)
+        word.save(buffer)
+        original = buffer.getvalue()
+        with patch("app.documents.office_executable", return_value=None):
+            response = client.post("/api/resources", data={"course_id": course}, files={
+                "file": ("legacy.docx", original),
+            })
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(client.get(f"/api/resources?course_id={course}").json(), [])
+
+        resource_id = new_id()
+        folder = files / resource_id
+        folder.mkdir()
+        (folder / "original.docx").write_bytes(original)
+        with Session(engine) as db:
+            db.add(resource_model(
+                id=resource_id, owner_id=teacher["id"], course_id=course, title="旧 Word 讲义",
+                filename="legacy.docx", extension="docx", size=len(original), pages=["旧的整篇文本"],
+            ))
+            db.commit()
+        self.assertEqual(client.get(f"/api/resources/{resource_id}/pages/1").status_code, 409)
+
+        def convert(_, filter_spec, output):
+            self.assertIn("ExportBookmarks", filter_spec)
+            result = output / "converted.pdf"
+            result.write_bytes(converted_pdf)
+            return result
+
+        with patch("app.documents.office_executable", return_value="test-office"), patch(
+            "app.documents.convert_with_office", side_effect=convert,
+        ):
+            row = client.post(f"/api/resources/{resource_id}/process").raise_for_status().json()
+            uploaded = client.post("/api/resources", data={"course_id": course}, files={
+                "file": ("new.docx", original),
+            }).raise_for_status().json()
+        self.assertEqual(row["title"], "旧 Word 讲义")
+        for entry in (row, uploaded):
+            self.assertTrue(entry["has_preview"])
+            self.assertEqual(entry["page_count"], 2)
+            self.assertEqual(entry["outline"][0]["children"][0]["start"], 2)
+            preview = client.get(f"/api/resources/{entry['id']}/preview").raise_for_status()
+            self.assertEqual(preview.content, converted_pdf)
+        second_page = client.get(f"/api/resources/{resource_id}/pages/2").raise_for_status().json()
+        self.assertIn("Repeatable read", second_page["text"])
 
 
 if __name__ == "__main__":

@@ -11,7 +11,7 @@ from pypdf.errors import PdfReadError
 from sqlalchemy import select
 
 from .auth import DB, Teacher, course_access
-from .documents import EXTENSIONS, FILES, inspect_resource
+from .documents import EXTENSIONS, FILES, WORD_EXTENSIONS, OfficeUnavailable, inspect_resource
 from .models import Resource, identifier
 
 router = APIRouter(prefix="/api/resources", tags=["resources"])
@@ -48,6 +48,18 @@ def owned_resource(db, user, resource_id):
     return row
 
 
+def process_resource_file(original, extension):
+    try:
+        return inspect_resource(original, extension)
+    except OfficeUnavailable as error:
+        raise HTTPException(503, str(error)) from error
+    except subprocess.TimeoutExpired as error:
+        raise HTTPException(504, "文档转换超时，请稍后重试") from error
+    except (ValueError, PdfReadError, BadZipFile, KeyError, subprocess.CalledProcessError) as error:
+        message = str(error) if type(error) is ValueError else "文件无法解析，请检查格式后重试"
+        raise HTTPException(422, message) from error
+
+
 @router.get("")
 def list_resources(course_id: int, db: DB, user: Teacher):
     course_access(db, user, course_id)
@@ -80,7 +92,7 @@ def upload_resource(
                 target.write(chunk)
         if not size:
             raise HTTPException(422, "文件为空")
-        pages, outline, preview, page_count = inspect_resource(original, extension)
+        pages, outline, preview, page_count = process_resource_file(original, extension)
         row = Resource(
             id=folder.name, owner_id=user.id, course_id=course_id, filename=name,
             title=(title or "").strip() or Path(name).stem[:160], extension=extension,
@@ -88,10 +100,6 @@ def upload_resource(
         )
         db.add(row)
         db.commit()
-    except (ValueError, PdfReadError, BadZipFile, KeyError, subprocess.SubprocessError) as error:
-        shutil.rmtree(folder, ignore_errors=True)
-        message = str(error) if type(error) is ValueError else "文件无法解析，请检查格式后重试"
-        raise HTTPException(422, message) from error
     except Exception:
         shutil.rmtree(folder, ignore_errors=True)
         raise
@@ -101,6 +109,24 @@ def upload_resource(
 @router.get("/{resource_id}")
 def get_resource(resource_id: str, db: DB, user: Teacher):
     return resource_view(owned_resource(db, user, resource_id), detail=True)
+
+
+@router.post("/{resource_id}/process")
+def process_word_resource(resource_id: str, db: DB, user: Teacher):
+    row = owned_resource(db, user, resource_id)
+    if row.extension not in WORD_EXTENSIONS:
+        raise HTTPException(422, "只有 Word 资料支持此转换操作")
+    folder = FILES / row.id
+    if row.has_preview and (folder / "preview.pdf").is_file():
+        return resource_view(row, detail=True)
+    original = folder / f"original.{row.extension}"
+    if not original.is_file():
+        raise HTTPException(409, "找不到原始 Word 文件，请重新上传")
+    row.pages, row.outline, row.has_preview, row.page_count = process_resource_file(original, row.extension)
+    if not any(row.pages):
+        row.status = "draft"
+    db.commit()
+    return resource_view(row, detail=True)
 
 
 @router.get("/{resource_id}/file")
@@ -121,6 +147,8 @@ def get_preview(resource_id: str, db: DB, user: Teacher):
 @router.get("/{resource_id}/pages/{page}")
 def get_page(resource_id: str, page: int, db: DB, user: Teacher):
     row = owned_resource(db, user, resource_id)
+    if row.extension in WORD_EXTENSIONS and not row.has_preview:
+        raise HTTPException(409, "请先将 Word 资料转换为 PDF")
     if not 1 <= page <= len(row.pages):
         raise HTTPException(404, "这一页没有可读文本")
     return {"text": row.pages[page - 1]}
@@ -145,8 +173,11 @@ def update_resource(resource_id: str, data: ResourceUpdate, db: DB, user: Teache
     if data.outline is not None:
         validate_outline(data.outline, 1, row.page_count)
         row.outline = [node.model_dump() for node in data.outline]
-    if data.status == "ready" and not any(row.pages):
-        raise HTTPException(422, "没有可提取的正文。请上传带文本层的文件")
+    if data.status == "ready":
+        if row.extension in WORD_EXTENSIONS and not row.has_preview:
+            raise HTTPException(409, "请先将 Word 资料转换为 PDF")
+        if not any(row.pages):
+            raise HTTPException(422, "没有可提取的正文。请上传带文本层的文件")
     row.title = data.title.strip()
     if data.status is not None:
         row.status = data.status

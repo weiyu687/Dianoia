@@ -30,7 +30,8 @@ async function load() {
       api(`/lessons?course_id=${courseId.value}`), api(`/resources?course_id=${courseId.value}`),
     ])
     lessons.value = plans
-    resources.value = documents.filter((row) => row.status === 'ready')
+    resources.value = documents.filter((row) => row.status === 'ready'
+      && (!['doc', 'docx'].includes(row.extension) || row.has_preview))
   } catch (failure) { error.value = failure.message }
   finally { loading.value = false }
 }

@@ -6,7 +6,6 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from zipfile import ZipFile
 
-from docx import Document
 from pypdf import PdfReader
 from pptx import Presentation
 
@@ -14,20 +13,42 @@ from .db import DATA_DIR
 
 FILES = DATA_DIR / "resources"
 MAX_PAGES = 500
-OFFICE = os.getenv("DIANOIA_SOFFICE") or shutil.which("soffice")
-EXTENSIONS = {"doc", "docx", "pptx", "pdf"}
+WORD_EXTENSIONS = {"doc", "docx"}
+EXTENSIONS = WORD_EXTENSIONS | {"pptx", "pdf"}
+WORD_PDF_FILTER = 'pdf:writer_pdf_Export:{"ExportBookmarks":{"type":"boolean","value":"true"}}'
 CHAPTER = re.compile(r"^(?:第[一二三四五六七八九十百零〇0-9]+[章节篇单元]|\d+(?:\.\d+)+\s+).{1,80}$")
 NUMBERED_HEADING = re.compile(r"^(\d+(?:\.\d+)+)\s+")
 
 
+class OfficeUnavailable(RuntimeError):
+    pass
+
+
+def office_executable():
+    if configured := os.getenv("DIANOIA_SOFFICE"):
+        return configured
+    if executable := shutil.which("soffice"):
+        return executable
+    if os.name == "nt":
+        locations = [DATA_DIR / "tools" / "LibreOffice"]
+        locations.extend(Path(os.environ[key]) / "LibreOffice" for key in ("ProgramFiles", "ProgramFiles(x86)") if key in os.environ)
+        for root in locations:
+            for name in ("soffice.com", "soffice.exe"):
+                executable = root / "program" / name
+                if executable.is_file():
+                    return str(executable)
+    return None
+
+
 def convert_with_office(source, format_spec, output_dir):
-    if not OFFICE:
+    office = office_executable()
+    if not office:
         return None
     with TemporaryDirectory(prefix="dianoia-office-") as profile:
         subprocess.run(
-            [OFFICE, f"-env:UserInstallation={Path(profile).as_uri()}", "--headless",
+            [office, f"-env:UserInstallation={Path(profile).as_uri()}", "--headless",
              "--convert-to", format_spec, "--outdir", str(output_dir), str(source)],
-            check=True, timeout=45, capture_output=True,
+            check=True, timeout=45, capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     result = output_dir / f"{source.stem}.{format_spec.split(':', 1)[0]}"
     return result if result.exists() else None
@@ -132,7 +153,20 @@ def inspect_resource(source, extension):
     if extension == "pdf":
         pages, outline = pdf_data(source)
         return pages, outline, True, len(pages)
-    slides, slide_outline = slide_text(Presentation(source)) if extension == "pptx" else ([], [])
+    if extension in WORD_EXTENSIONS:
+        if not office_executable():
+            raise OfficeUnavailable("服务器未配置 LibreOffice，暂时无法转换 Word 资料")
+        with TemporaryDirectory(prefix="word-pdf-", dir=source.parent) as folder:
+            try:
+                pdf = convert_with_office(source, WORD_PDF_FILTER, Path(folder))
+            except FileNotFoundError as error:
+                raise OfficeUnavailable("找不到配置的 LibreOffice 可执行文件") from error
+            if not pdf:
+                raise ValueError("Word 文件未能转换成 PDF，请检查文件是否加密或损坏")
+            pages, outline = pdf_data(pdf)
+            pdf.replace(source.parent / "preview.pdf")
+        return pages, outline, True, len(pages)
+    slides, slide_outline = slide_text(Presentation(source))
     pdf = convert_with_office(source, "pdf", source.parent)
     if pdf:
         pages, outline = pdf_data(pdf)
@@ -141,9 +175,4 @@ def inspect_resource(source, extension):
         if pdf.name != "preview.pdf":
             pdf.replace(source.parent / "preview.pdf")
         return pages, outline or (slide_outline if len(pages) == len(slides) else []), True, len(pages)
-    if extension == "docx":
-        document = Document(source)
-        parts = [paragraph.text for paragraph in document.paragraphs]
-        parts.extend(" | ".join(cell.text for cell in row.cells) for table in document.tables for row in table.rows)
-        return ["\n".join(parts).strip()], [], False, 0
     return slides, slide_outline, False, len(slides)
