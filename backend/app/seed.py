@@ -9,6 +9,8 @@ from .auth import passwords
 from .db import Base, engine
 from .models import ClassGroup, Course, Enrollment, Student, TeachingAssignment, User
 
+SAMPLE_COURSE_NAME = "python语言与程序设计"
+
 
 def main():
     password = os.getenv("DIANOIA_SEED_PASSWORD") or getpass("本地虚拟账号密码（至少 10 字符）: ")
@@ -27,8 +29,10 @@ def main():
             accounts[role] = account
         course = db.scalar(select(Course).where(Course.code == "DB101"))
         if not course:
-            course = Course(code="DB101", name="数据库原理")
+            course = Course(code="DB101", name=SAMPLE_COURSE_NAME)
             db.add(course)
+        elif course.name == "数据库原理":
+            course.name = SAMPLE_COURSE_NAME
         db.flush()
         assignment = (accounts["teacher"].id, course.id)
         if not db.get(TeachingAssignment, assignment):

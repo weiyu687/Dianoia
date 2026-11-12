@@ -130,7 +130,7 @@ async function perform(item, action, title) {
     </Empty>
     <Modal :open="createOpen" title="新建教案" wide @close="closeCreate">
       <form class="stack" @submit.prevent="create">
-        <label>教案名称<input v-model.trim="newTitle" required maxlength="160" placeholder="例如：事务与隔离级别"></label>
+        <label>教案名称<input v-model.trim="newTitle" required maxlength="160" placeholder="例如：函数的定义与调用"></label>
         <label>生成要求<textarea v-model="instruction" maxlength="3000" rows="3" placeholder="可填写授课对象、课时及教学目标"></textarea></label>
         <div class="section-heading"><h3>参考资料</h3><button class="button secondary" type="button" :disabled="!resources.length || sources.length >= 12" @click="sources.push({ resource_id: '', start: 1, end: 1, max: 1, outline: [] })"><Plus :size="15" /> 添加资料</button></div>
         <p v-if="!resources.length" class="muted">资料库有已入库的文件后，可选择章节或页码。</p>
