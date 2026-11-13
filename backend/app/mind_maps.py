@@ -1,11 +1,13 @@
+import binascii
 import json
+from base64 import b64decode
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from fastapi import APIRouter, Header, HTTPException
-from pydantic import BaseModel, Field, StringConstraints, ValidationError, model_validator
+from pydantic import BaseModel, Field, HttpUrl, StringConstraints, ValidationError, model_validator
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
@@ -16,6 +18,9 @@ from .models import MindMap, MindMapTemplate, Resource, identifier, now
 
 router = APIRouter(prefix="/api", tags=["mind maps"])
 Color = Annotated[str, StringConstraints(pattern=r"^#[0-9a-fA-F]{6}$")]
+NodeId = Annotated[str, StringConstraints(pattern=r"^[a-zA-Z0-9_-]{1,64}$")]
+ShortText = Annotated[str, StringConstraints(max_length=160)]
+Icon = Literal["priority_1", "priority_2", "priority_3", "progress_1", "progress_4", "sign_1", "sign_2", "sign_3"]
 
 
 class MindStyle(BaseModel):
@@ -28,14 +33,84 @@ class MindStyle(BaseModel):
     shape: Literal["rectangle", "roundedRectangle", "diamond", "ellipse"] | None = None
 
 
+class NodeImage(BaseModel):
+    data_url: str = Field(max_length=220000)
+    width: int = Field(ge=1, le=1000)
+    height: int = Field(ge=1, le=1000)
+
+    @model_validator(mode="after")
+    def validate_raster(self):
+        prefix, separator, encoded = self.data_url.partition(",")
+        if prefix != "data:image/webp;base64" or not separator:
+            raise ValueError("请使用编辑器上传本地图片")
+        try:
+            raster = b64decode(encoded, validate=True)
+        except binascii.Error as error:
+            raise ValueError("图片数据无效") from error
+        if len(raster) < 16 or raster[:4] != b"RIFF" or raster[8:12] != b"WEBP":
+            raise ValueError("图片数据无效")
+        return self
+
+
+class NodeLink(BaseModel):
+    url: HttpUrl
+    label: ShortText = ""
+
+
+class NodeFrame(BaseModel):
+    group_id: NodeId
+    text: ShortText = ""
+
+
+class LinePoint(BaseModel):
+    x: float = Field(ge=-100000, le=100000)
+    y: float = Field(ge=-100000, le=100000)
+    dir: Literal["left", "right", "top", "bottom"] | None = None
+    range: float | None = Field(default=None, ge=-100000, le=100000)
+
+
+class LineAnchors(BaseModel):
+    startPoint: LinePoint
+    endPoint: LinePoint
+
+
+class NodeLine(BaseModel):
+    target: NodeId
+    text: ShortText = ""
+    anchors: LineAnchors | None = None
+    offsets: tuple[LinePoint, LinePoint] | None = None
+
+
+class NodeTable(BaseModel):
+    rows: list[list[ShortText]] = Field(min_length=1, max_length=16)
+
+    @model_validator(mode="after")
+    def rectangular(self):
+        columns = len(self.rows[0])
+        if not 1 <= columns <= 8 or any(len(row) != columns for row in self.rows):
+            raise ValueError("表格须有 1 至 8 列，且各行列数相同")
+        return self
+
+
 class MindNode(BaseModel):
-    id: str = Field(default_factory=identifier, pattern=r"^[a-zA-Z0-9_-]{1,64}$")
+    id: NodeId = Field(default_factory=identifier)
     text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=320)]
     note: str = Field(default="", max_length=2000)
     expanded: bool = True
     direction: Literal["left", "right"] | None = None
     style: MindStyle = Field(default_factory=MindStyle)
     sources: list[Source] = Field(default_factory=list, max_length=12)
+    labels: list[ShortText] = Field(default_factory=list, max_length=4)
+    summary: ShortText = ""
+    frame: NodeFrame | None = None
+    lines: list[NodeLine] = Field(default_factory=list, max_length=20)
+    node_links: list[NodeId] = Field(default_factory=list, max_length=20)
+    image: NodeImage | None = None
+    icon: Icon | None = None
+    hyperlink: NodeLink | None = None
+    formula: str = Field(default="", max_length=1000)
+    table: NodeTable | None = None
+    code: str = Field(default="", max_length=4000)
     children: list["MindNode"] = Field(default_factory=list, max_length=80)
 
 
@@ -57,10 +132,20 @@ class MindDocument(BaseModel):
     @model_validator(mode="after")
     def check_tree(self):
         seen = set()
-        for node, depth in nodes(self.root):
+        image_size = 0
+        ordered = list(nodes(self.root))
+        for node, depth in ordered:
             if node.id in seen or depth > 12 or len(seen) >= 350:
                 raise ValueError("导图最多 350 个主题和 12 层，主题 ID 必须唯一")
             seen.add(node.id)
+            if node.image:
+                image_size += len(node.image.data_url)
+        if image_size > 2500000:
+            raise ValueError("导图图片总量过大，请移除部分图片")
+        for node, _ in ordered:
+            valid_lines = {line.target: line for line in node.lines if line.target in seen and line.target != node.id}
+            node.lines = list(valid_lines.values())
+            node.node_links = [target for target in dict.fromkeys(node.node_links) if target in seen and target != node.id]
         self.root.expanded = True
         return self
 
@@ -116,7 +201,7 @@ def builtin_templates():
     return {item["id"]: {
         **item, "document": MindDocument(
             layout=item["layout"], palette=item["palette"], root=branch(item["tree"], item["id"]),
-        ).model_dump(exclude_none=True),
+        ).model_dump(mode="json", exclude_none=True),
     } for item in entries}
 
 
@@ -167,7 +252,7 @@ def clean_template(document):
 
 
 def insert(db, model, user, title, document, **fields):
-    row = model(owner_id=user.id, title=title, document=document.model_dump(exclude_none=True), **fields)
+    row = model(owner_id=user.id, title=title, document=document.model_dump(mode="json", exclude_none=True), **fields)
     db.add(row)
     db.commit()
     return map_view(row, True)
@@ -184,7 +269,7 @@ def save(db, user, model, item_id, data):
                              existing=all_sources(MindDocument.model_validate(row.document)))
         else:
             clean_template(data.document)
-        values["document"] = data.document.model_dump(exclude_none=True)
+        values["document"] = data.document.model_dump(mode="json", exclude_none=True)
     if any(getattr(row, key) != value for key, value in values.items()):
         result = db.execute(update(model).where(model.id == item_id, model.revision == data.revision)
                             .values(**values, revision=model.revision + 1, updated_at=now()))

@@ -45,6 +45,8 @@
 
 思维导图保存平台定义的纯文本节点、样式和已授权资料引用。Vue 适配器负责与绘图库交换节点数据。浏览器生成 PNG，默认按 2 倍像素密度导出，并按浏览器画布上限缩放。已在 Windows Chrome 验证中文多行输入、分支换父节点、自动保存、模板副本、来源跳页和完整图幅导出。已验证真实模型按资料页生成和 Agent 创建工具。[SimpleMindMap](https://wanglin2.github.io/mind-map-docs/start/introduction.html) · [AntV X6 导图示例](https://x6.antv.antgroup.com/en/examples/showcase/practices/mindmap/)
 
+编辑工具扩展继续使用已选的 SimpleMindMap。关联线和外框启用库自带插件，概要、图标和链接复用节点能力。附件引用课程资料库。公式预览声明现有锁文件中的 KaTeX 0.16.47 为直接依赖，按纯 LaTeX 输入在浏览器渲染。表格、代码块和双向链接保存在节点结构中，通过编辑器查看。Windows Chrome 已验证公式预览、节点保存重开及图形导出。[SimpleMindMap 节点内容](https://wanglin2.github.io/mind-map-docs/course/course2.html) · [知犀编辑工具](https://help.zhixi.com/faq/21585.html)
+
 ## 待验证和待选型
 
 - 资料向量检索的候选为 PostgreSQL + pgvector 与 Qwen3-Embedding。以真实中文课程样本比较证据召回、章节切分与引用页码后再确认。

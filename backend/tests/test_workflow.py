@@ -205,9 +205,25 @@ class WorkflowTest(unittest.TestCase):
         self.assertEqual(branch["sources"], [source])
         self.assertEqual(branch["children"][0]["text"], "可重复读")
         branch["style"] = {"shape": "diamond"}
+        child_id = branch["children"][0]["id"]
+        branch.update({
+            "labels": ["重点"], "summary": "事务隔离", "frame": {"group_id": "frame", "text": "专题"},
+            "lines": [{"target": child_id, "text": "示例"}, {"target": "deleted"}],
+            "node_links": [child_id, child_id, "deleted"],
+            "formula": r"\frac{a}{b}", "table": {"rows": [["模式", "现象"], ["隔离", "可重复读"]]},
+            "code": "select * from lessons",
+        })
         payload = {"title": row["title"], "revision": row["revision"], "document": document}
+        branch["hyperlink"] = {"url": "javascript:alert(1)"}
+        self.assertEqual(client.put(path, json=payload).status_code, 422)
+        branch["hyperlink"] = {"url": "https://example.com/docs", "label": "教程 <原文>"}
         updated = client.put(path, json=payload).raise_for_status().json()
         self.assertEqual(updated["revision"], 2)
+        updated_branch = updated["document"]["root"]["children"][0]
+        self.assertEqual(updated_branch["lines"], [{"target": child_id, "text": "示例"}])
+        self.assertEqual(updated_branch["node_links"], [child_id])
+        self.assertEqual(updated_branch["hyperlink"], branch["hyperlink"])
+        self.assertEqual(updated_branch["table"], branch["table"])
         self.assertEqual(client.put(path, json=payload).status_code, 409)
         key = {"Idempotency-Key": str(uuid4())}
         copy = client.post(f"{path}/copy", headers=key).raise_for_status().json()
@@ -219,6 +235,7 @@ class WorkflowTest(unittest.TestCase):
             "course_id": course, "title": "模板副本", "template_id": template["id"],
         }).raise_for_status().json()
         self.assertEqual(derived["document"]["root"]["children"][0]["style"]["shape"], "diamond")
+        self.assertEqual(derived["document"]["root"]["children"][0]["summary"], branch["summary"])
         self.assertEqual(derived["document"]["root"]["text"], "模板副本")
         self.assertEqual(client.get(f"{templates}/{template['id']}").json()["document"]["root"]["text"], "数据库事务")
         client.delete(f"/api/resources/{resource_id}").raise_for_status()

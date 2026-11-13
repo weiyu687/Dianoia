@@ -1,18 +1,35 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import {
-  ArrowLeft, ChevronDown, Download, Expand, FilePlus2, Files, FoldVertical, GitBranch,
-  ListTree, Maximize, Minus, Palette, Plus, Redo2, Save, StickyNote, Trash2, Undo2, UnfoldVertical, X,
+  ArrowLeft, BetweenHorizontalEnd, ChevronDown, CodeXml, Download, FilePlus2, Files, FoldVertical, GitBranch,
+  Image, Link2, ListTree, Maximize, MessageSquare, Minus, Palette, Paperclip, Plus, Redo2, Save, Sigma, Smile,
+  SquareDashed, StickyNote, Table2, Trash2, Undo2, UnfoldVertical, Waypoints, X,
 } from 'lucide-vue-next'
 import { api } from '../api'
 import { courseId } from '../session'
-import { canvasTheme, createCanvas, flatNodes, fromCanvas, layouts, nodeBadges, palettes, toCanvas } from '../mindMapCanvas'
+import { canvasTheme, createCanvas, editorBadges, flatNodes, fromCanvas, hyperlinkData, layouts, mapNodeLinks, mapSourceNumbers, palettes, sourceColor, toCanvas } from '../mindMapCanvas'
 import { hasExportSources, mapExportOptions } from '../mindMapExport'
 import MapSources from '../components/MapSources.vue'
 import Modal from '../components/Modal.vue'
 import '../mindMaps.css'
 
+const MindNodeForm = defineAsyncComponent(() => import('../components/MindNodeForm.vue'))
+const nodeTools = [
+  { mode: 'line', label: '关联线', icon: Waypoints },
+  { mode: 'summary', label: '概要', icon: BetweenHorizontalEnd, branch: true },
+  { mode: 'frame', label: '外框', icon: SquareDashed, branch: true },
+  { mode: 'labels', label: '标注', icon: MessageSquare },
+  { mode: 'note', label: '备注', icon: StickyNote },
+  { mode: 'image', label: '图片', icon: Image },
+  { mode: 'icon', label: '图标', icon: Smile },
+  { mode: 'hyperlink', label: '链接', icon: Link2 },
+  { mode: 'nodeLinks', label: '双向链接', icon: GitBranch },
+  { mode: 'attachment', label: '附件', icon: Paperclip },
+  { mode: 'formula', label: '公式', icon: Sigma },
+  { mode: 'table', label: '表格', icon: Table2 },
+  { mode: 'code', label: '代码块', icon: CodeXml },
+]
 const route = useRoute()
 const router = useRouter()
 const template = route.name === 'mindMapTemplate'
@@ -37,6 +54,7 @@ const exporting = ref(false)
 const busy = ref(false)
 const zoom = ref(100)
 const nodeQuery = ref('')
+const lineStart = ref('')
 let engine
 let resize
 let theme
@@ -51,6 +69,30 @@ const current = computed(() => selected.value
 const outline = computed(() => flatNodes(documentData.value.root)
   .filter(({ node }) => node.text.toLowerCase().includes(nodeQuery.value.trim().toLowerCase())))
 const isRoot = computed(() => current.value?.id === documentData.value?.root.id)
+const panelResource = ref('')
+const sourceNumbers = computed(() => documentData.value ? mapSourceNumbers(documentData.value) : new Map())
+const visibleNodeSources = computed(() => current.value?.sources.filter((source) =>
+  !panelResource.value || source.resource_id === panelResource.value) || [])
+const canvasSelection = computed(() => selected.value.startsWith('summary-') && !current.value
+  ? flatNodes(documentData.value.root).find(({ node }) => `summary-${node.id}` === selected.value)?.node
+  : null)
+const linkedNodes = computed(() => {
+  if (!dialog.value?.node || dialog.value.mode !== 'nodeLinks') return []
+  const ids = new Set(mapNodeLinks(documentData.value, dialog.value.node.id))
+  return flatNodes(documentData.value.root).map(({ node }) => node).filter((node) => ids.has(node.id))
+})
+const targetNodes = computed(() => {
+  if (!dialog.value?.node || dialog.value.mode !== 'nodeLinks') return []
+  const excluded = new Set([dialog.value.node.id, ...linkedNodes.value.map((node) => node.id)])
+  return flatNodes(documentData.value.root).map(({ node }) => node).filter((node) => !excluded.has(node.id))
+})
+const sourceLegend = computed(() => [...sourceNumbers.value].map(([id, number]) => ({ id, number })))
+const dialogTitle = computed(() => {
+  if (dialog.value?.mode === 'export') return '下载 PNG'
+  if (dialog.value?.mode === 'template') return '存为模板'
+  if (dialog.value?.mode === 'sources') return dialog.value.node ? '挂载节点资料' : '挂载整图资料'
+  return nodeTools.find((tool) => tool.mode === dialog.value?.mode)?.label
+})
 const dark = () => document.documentElement.dataset.theme !== 'light'
 const sourceLabel = (source) => resources.value.find((file) => file.id === source.resource_id)?.title || '资料已不可用'
 const sourceAvailable = (source) => resources.value.some((file) => file.id === source.resource_id)
@@ -75,6 +117,34 @@ function syncTree() {
   documentData.value = { ...documentData.value, root }
   if (snapshot() !== savedSnapshot) scheduleSave()
   else if (!pending && !conflicts) status.value = 'saved'
+}
+
+function refreshBadges() {
+  if (closed || !engine?.renderer.root) return
+  const badges = editorBadges(documentData.value)
+  let resizeNodes = false
+  for (const { node } of flatNodes(documentData.value.root)) {
+    const rendered = engine.renderer.findNodeByUid(node.id)
+    if (!rendered) continue
+    const tags = badges(node)
+    if (JSON.stringify(rendered.getData('tag') || []) === JSON.stringify(tags)) continue
+    rendered.setData({ tag: tags })
+    resizeNodes = rendered.reRender() || resizeNodes
+  }
+  if (resizeNodes) engine.render()
+}
+
+function setSourcePanel(node, id) {
+  selected.value = node.getData('uid')
+  panelResource.value = id
+  panel.value = 'sources'
+}
+
+function commitCanvasEditors() {
+  if (!engine) return
+  engine.renderer.textEdit.hideEditTextBox()
+  engine.associativeLine.hideEditTextBox()
+  engine.outerFrame.hideEditTextBox()
 }
 
 function save() {
@@ -110,14 +180,15 @@ function save() {
 }
 
 async function flush() {
-  engine?.renderer.textEdit.hideEditTextBox()
+  commitCanvasEditors()
   syncTree()
   if (pending && !await pending) return false
   return save()
 }
 
 function protectRefresh(event) {
-  if (!item.value || (snapshot() === savedSnapshot && !engine?.renderer.textEdit.isShowTextEdit())) return
+  const editing = engine?.renderer.textEdit.isShowTextEdit() || engine?.associativeLine.showTextEdit || engine?.outerFrame.showTextEdit
+  if (!item.value || (snapshot() === savedSnapshot && !editing)) return
   event.preventDefault()
   event.returnValue = ''
 }
@@ -148,11 +219,32 @@ onMounted(async () => {
       dark: dark(),
       disabledClipboard: true,
       customCheckEnableShortcut: (event) => !event.isComposing && event.keyCode !== 229
-        && !dialog.value && (event.target === host.value || event.target.classList?.contains('smm-node-edit-wrap')),
+        && !dialog.value && (event.target === host.value
+          || engine?.editNodeClassList.some((name) => event.target.classList?.contains(name))),
     })
     engine.keyCommand.removeShortcut('Control+g')
-    engine.on('data_change', syncTree)
-    engine.on('node_active', (node, active) => { selected.value = (node || active[0])?.getData('uid') || '' })
+    engine.on('data_change', () => {
+      syncTree()
+      refreshBadges()
+    })
+    engine.on('node_tree_render_end', refreshBadges)
+    engine.on('node_active', (node, active) => {
+      const id = (node || active[0])?.getData('uid') || ''
+      if (selected.value !== id) panelResource.value = ''
+      selected.value = id
+    })
+    engine.on('node_click', (target) => {
+      if (!lineStart.value || target.isGeneralization || target.getData('uid') === lineStart.value) return
+      const origin = engine.renderer.findNodeByUid(lineStart.value)
+      lineStart.value = ''
+      if (origin && (origin.getData('associativeLineTargets') || []).length < 20) {
+        command('ADD_ASSOCIATIVE_LINE', origin, target)
+      }
+    })
+    engine.on('draw_click', () => { lineStart.value = '' })
+    engine.on('contextmenu', () => { lineStart.value = '' })
+    engine.on('associative_line_click', () => host.value.focus())
+    engine.on('outer_frame_active', () => host.value.focus())
     engine.on('node_contextmenu', (event, node) => {
       selected.value = node.getData('uid')
       const bounds = studio.value.getBoundingClientRect()
@@ -163,7 +255,13 @@ onMounted(async () => {
     })
     engine.on('node_tag_click', (node, tag) => {
       node.active()
-      panel.value = tag === '备注' ? 'note' : 'sources'
+      const id = node.getData('uid')
+      if (tag.kind === 'source') setSourcePanel(node, tag.resourceId)
+      else if (tag.kind === 'note') panel.value = 'note'
+      else if (tag.kind) {
+        const entry = flatNodes(documentData.value.root).find(({ node }) => node.id === id)?.node
+        if (entry) dialog.value = { mode: tag.kind, node: entry }
+      }
     })
     engine.on('view_data_change', () => { zoom.value = Math.round(engine.view.scale * 100) })
     resize = new ResizeObserver(() => { if (host.value?.clientWidth) engine.resize() })
@@ -203,10 +301,8 @@ function pick(id) {
 function setNode(data) {
   const node = engine?.renderer.activeNodeList[0]
   if (node) {
-    command('SET_NODE_STYLES', node, {
-      ...data,
-      tag: nodeBadges(data.mapNote ?? node.getData('mapNote'), data.mapSources ?? node.getData('mapSources')),
-    })
+    command('SET_NODE_STYLES', node, data)
+    refreshBadges()
   }
 }
 
@@ -236,7 +332,79 @@ function setPalette(value) {
 
 function togglePanel(value) {
   context.value = null
+  panelResource.value = ''
   panel.value = panel.value === value ? '' : value
+}
+
+function useNodeTool(mode) {
+  const node = current.value || (mode === 'summary' ? canvasSelection.value : null)
+  if (!node || !engine) return
+  engine.renderer.textEdit.hideEditTextBox()
+  context.value = null
+  if (mode === 'note') { togglePanel('note'); return }
+  if (mode === 'attachment') { showDialog('sources', node); return }
+  if (mode === 'line') {
+    if (lineStart.value) cancelLine()
+    else lineStart.value = node.id
+    host.value.focus()
+    return
+  }
+  dialog.value = { mode, node }
+}
+
+function cancelLine() {
+  lineStart.value = ''
+}
+
+function saveNodeDetail(value) {
+  const { mode, node } = dialog.value
+  const rendered = engine.renderer.findNodeByUid(node.id)
+  if (!rendered) { dialog.value = null; return }
+  const fields = { labels: 'mapLabels', formula: 'mapFormula', code: 'mapCode', table: 'mapTable' }
+  if (fields[mode]) command('SET_NODE_STYLES', rendered, { [fields[mode]]: value })
+  else if (mode === 'summary') {
+    command('SET_NODE_DATA', rendered, { generalization: value ? [{ text: value, uid: `summary-${node.id}` }] : null })
+    engine.render()
+  } else if (mode === 'frame') {
+    if (value === null) {
+      const frame = node.frame?.group_id
+      for (const { node: branch } of flatNodes(documentData.value.root)) {
+        if (branch.frame?.group_id !== frame) continue
+        const target = engine.renderer.findNodeByUid(branch.id)
+        if (target) command('SET_NODE_DATA', target, { outerFrame: null })
+      }
+    } else if (node.frame) {
+      for (const { node: branch } of flatNodes(documentData.value.root)) {
+        if (branch.frame?.group_id !== node.frame.group_id) continue
+        const target = engine.renderer.findNodeByUid(branch.id)
+        if (target) command('SET_NODE_DATA', target, { outerFrame: { groupId: node.frame.group_id, text: value } })
+      }
+    } else command('ADD_OUTER_FRAME', engine.renderer.activeNodeList, { text: value })
+    engine.render()
+  } else if (mode === 'icon') command('SET_NODE_ICON', rendered, value ? [value] : [])
+  else if (mode === 'image') command('SET_NODE_IMAGE', rendered, value ? { url: value.data_url, width: value.width, height: value.height } : { url: null })
+  else if (mode === 'hyperlink') command('SET_NODE_STYLES', rendered, hyperlinkData(value))
+  else if (mode === 'nodeLinks') command('SET_NODE_DATA', rendered, { mapNodeLinks: [...new Set([...node.node_links, value])].slice(0, 20) })
+  refreshBadges()
+  dialog.value = null
+}
+
+function unlinkNode(target) {
+  const { node } = dialog.value
+  const outgoing = node.node_links.includes(target)
+  const originId = outgoing ? node.id : target
+  const destination = outgoing ? target : node.id
+  const removeLink = (origin) => {
+    if (!origin) return
+    command('SET_NODE_DATA', origin, {
+      mapNodeLinks: (origin.getData('mapNodeLinks') || []).filter((id) => id !== destination),
+    })
+    refreshBadges()
+  }
+  const origin = engine.renderer.findNodeByUid(originId)
+  if (origin) removeLink(origin)
+  else command('GO_TARGET_NODE', originId, removeLink)
+  dialog.value = null
 }
 
 function showDialog(mode, node = null) {
@@ -263,6 +431,7 @@ async function submitDialog() {
     else {
       documentData.value.sources = sources
       scheduleSave()
+      refreshBadges()
     }
     dialog.value = null
     return
@@ -288,7 +457,7 @@ async function exportImage(includePages) {
   if (exporting.value || !engine) return
   exporting.value = true
   error.value = ''
-  engine.renderer.textEdit.hideEditTextBox()
+  commitCanvasEditors()
   syncTree()
   const surface = document.createElement('div')
   surface.className = 'map-export-surface'
@@ -350,12 +519,19 @@ async function exportImage(includePages) {
         <div class="map-tools map-panel-tools">
           <button class="button subtle" :aria-pressed="panel === 'outline'" @click="togglePanel('outline')"><ListTree :size="17" /> 大纲</button>
           <button class="button subtle" :aria-pressed="panel === 'style'" @click="togglePanel('style')"><Palette :size="17" /> 样式</button>
-          <button class="button subtle" :aria-pressed="panel === 'note'" @click="togglePanel('note')"><StickyNote :size="17" /> 备注</button>
           <button v-if="!template" class="button subtle" :aria-pressed="panel === 'sources'" @click="togglePanel('sources')"><Files :size="17" /> 资料</button>
         </div>
       </div>
-      <div ref="studio" class="map-studio" @keydown.esc="context = null">
+      <div class="map-insert-tools" role="toolbar" aria-label="插入到主题">
+        <button v-for="tool in nodeTools.filter(({ mode }) => !template || mode !== 'attachment')" :key="tool.mode"
+          type="button" class="button subtle" :disabled="(!current && !(tool.mode === 'summary' && canvasSelection)) || (tool.branch && isRoot)"
+          :aria-pressed="tool.mode === 'line' ? !!lineStart : undefined" @click="useNodeTool(tool.mode)">
+          <component :is="tool.icon" :size="19" />{{ tool.label }}
+        </button>
+      </div>
+      <div ref="studio" class="map-studio" @keydown.esc="context = null; cancelLine()">
         <div ref="host" class="map-canvas" tabindex="0" role="region" aria-label="思维导图画布" @pointerdown="context = null" />
+        <div v-if="lineStart" class="map-line-prompt" role="status">点击目标主题以连接 <button class="button subtle" @click="cancelLine">取消</button></div>
         <div class="map-zoom actions">
           <button class="button subtle icon-only" title="缩小" aria-label="缩小" @click="engine?.view.narrow()"><Minus :size="16" /></button>
           <span>{{ zoom }}%</span>
@@ -410,6 +586,12 @@ async function exportImage(includePages) {
             <p v-else class="muted">请选择要备注的主题。</p>
           </div>
           <div v-else class="map-inspector-content stack">
+            <template v-if="sourceLegend.length">
+              <strong>资料编号</strong>
+              <div v-for="{ id, number } in sourceLegend" :key="id" class="map-source-legend">
+                <span :style="{ background: sourceColor(number) }">{{ number }}</span><span>{{ sourceLabel({ resource_id: id }) }}</span>
+              </div>
+            </template>
             <div class="section-heading"><strong>整图资料</strong><button class="button secondary" @click="showDialog('sources')">管理</button></div>
             <p v-if="!documentData.sources.length" class="muted">暂无整图资料。</p>
             <div v-for="(source, index) in documentData.sources" :key="index" class="map-reference">
@@ -419,8 +601,9 @@ async function exportImage(includePages) {
             <template v-if="current">
               <div class="section-heading"><strong>节点资料</strong><button class="button secondary" @click="showDialog('sources', current)">管理</button></div>
               <p class="muted">{{ current.text }}</p>
-              <p v-if="!current.sources.length" class="muted">暂无节点资料。</p>
-              <div v-for="(source, index) in current.sources" :key="index" class="map-reference">
+              <button v-if="panelResource && visibleNodeSources.length !== current.sources.length" class="button subtle" @click="panelResource = ''">显示全部节点资料</button>
+              <p v-if="!visibleNodeSources.length" class="muted">暂无节点资料。</p>
+              <div v-for="(source, index) in visibleNodeSources" :key="index" class="map-reference">
                 <RouterLink v-if="sourceAvailable(source)" class="text-link" :to="{ name: 'resource', params: { id: source.resource_id }, query: { page: source.start } }" target="_blank">{{ sourceLabel(source) }} · {{ pageLabel(source) }}</RouterLink>
                 <span v-else class="muted">{{ sourceLabel(source) }} · {{ pageLabel(source) }}</span>
               </div>
@@ -430,8 +613,11 @@ async function exportImage(includePages) {
       </div>
       <footer class="map-footer"><span>{{ flatNodes(documentData.root).length }} 个主题</span><span><kbd>Tab</kbd> 子主题 <kbd>Enter</kbd> 同级主题 <kbd>Shift</kbd> + <kbd>Enter</kbd> 节点内换行</span></footer>
     </div>
-    <Modal :open="!!dialog" :wide="dialog?.mode === 'sources'" :title="dialog?.mode === 'export' ? '下载 PNG' : dialog?.mode === 'template' ? '存为模板' : dialog?.node ? '挂载节点资料' : '挂载整图资料'" @close="!busy && (dialog = null)">
-      <form v-if="dialog" class="stack" @submit.prevent="submitDialog">
+    <Modal :open="!!dialog" :wide="['sources', 'table', 'code'].includes(dialog?.mode)" :title="dialogTitle" @close="!busy && (dialog = null)">
+      <MindNodeForm v-if="dialog?.node && dialog.mode !== 'sources'" :key="`${dialog.mode}:${dialog.node.id}`"
+        :mode="dialog.mode" :node="dialog.node" :targets="targetNodes" :linked="linkedNodes"
+        @save="saveNodeDetail" @cancel="dialog = null" @unlink="unlinkNode" @jump="(id) => { dialog = null; pick(id) }" />
+      <form v-else-if="dialog" class="stack" @submit.prevent="submitDialog">
         <MapSources v-if="dialog.mode === 'sources'" v-model="dialog.sources" :resources="resources" />
         <template v-else-if="dialog.mode === 'export'">
           <label class="map-export-checkbox"><input v-model="dialog.includePages" type="checkbox" aria-describedby="map-export-help"> 标注参考资料页码</label>

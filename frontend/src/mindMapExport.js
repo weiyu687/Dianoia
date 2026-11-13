@@ -1,4 +1,4 @@
-import { canvasTheme, flatNodes, mapFontFamily } from './mindMapCanvas'
+import { canvasTheme, flatNodes, labelBadges, mapFontFamily, mapSourceNumbers } from './mindMapCanvas'
 
 function groupPages(sources) {
   const groups = new Map()
@@ -54,18 +54,14 @@ function addSourceLegend(svg, entries) {
 }
 
 export function mapExportOptions(map, resources, includePages) {
-  const options = { full: true, readonly: true, badges: () => [] }
+  const options = { full: true, readonly: true, badges: labelBadges }
   if (!includePages || !hasExportSources(map)) return options
 
   const whole = groupPages(map.sources)
-  const ids = new Set(whole.keys())
-  for (const { node } of flatNodes(map.root)) {
-    for (const source of node.sources) ids.add(source.resource_id)
-  }
-  const numbers = new Map([...ids].map((id, index) => [id, index + 1]))
+  const numbers = mapSourceNumbers(map)
   const titles = new Map(resources.map(({ id, title }) => [id, title]))
-  const prefix = (id) => ids.size > 1 ? `[${numbers.get(id)}] ` : ''
-  const legend = [...ids].map((id) => {
+  const prefix = (id) => numbers.size > 1 ? `[${numbers.get(id)}] ` : ''
+  const legend = [...numbers.keys()].map((id) => {
     const title = titles.get(id) || '资料已不可用'
     const pages = whole.has(id) ? `（整图选用${formatPages(whole.get(id))}）` : ''
     return `${prefix(id)}${title}${pages}`
@@ -73,13 +69,14 @@ export function mapExportOptions(map, resources, includePages) {
   const themeConfig = canvasTheme(map.palette)
   for (const level of ['root', 'second', 'node']) themeConfig[level].tagPlacement = 'bottom'
   return {
-    ...options, themeConfig, maxTag: 12,
-    badges: (node) => [...groupPages(node.sources)]
-      .sort(([a], [b]) => numbers.get(a) - numbers.get(b))
-      .map(([id, pages]) => ({
+    ...options, themeConfig,
+    badges: (node) => {
+      const citations = [...groupPages(node.sources)].sort(([a], [b]) => numbers.get(a) - numbers.get(b))
+      return [...labelBadges(node), ...citations.map(([id, pages]) => ({
         text: `${prefix(id)}${formatPages(pages)}`,
         style: { fill: '#5b5369', fontSize: 11, height: 17, paddingX: 5 },
-      })),
+      }))]
+    },
     handleBeingExportSvg: (svg) => addSourceLegend(svg, legend),
   }
 }

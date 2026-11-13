@@ -108,11 +108,15 @@ def chat(data: Chat, db: DB, user: Teacher):
 
     def mind_map_contents(map_id: str) -> dict:
         """读取当前课程的一张思维导图，含多级节点、备注与资料页码。"""
+        def text_node(node):
+            return {**{key: value for key, value in node.items() if key not in {"image", "children"}},
+                    "children": [text_node(child) for child in node["children"]]}
+
         def lookup(session, teacher):
             item = get_map(map_id, session, teacher)
             if item["course_id"] != course_id:
                 return {"error": "当前课程没有该导图"}
-            return {"title": item["title"], "root": item["document"]["root"],
+            return {"title": item["title"], "root": text_node(item["document"]["root"]),
                     "sources": item["document"]["sources"], "editor": f"/#/mind-maps/{map_id}"}
         return run_tool(lookup)
 
