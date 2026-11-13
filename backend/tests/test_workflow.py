@@ -168,6 +168,7 @@ class WorkflowTest(unittest.TestCase):
 
                 private_template = self.check_lesson_templates(client, course, route)
                 mind_map, map_template = self.check_mind_maps(client, course, resource["id"])
+                exam = self.check_exams(client, course)
                 second_teacher = login("t02", "teacher")
                 self.assertNotEqual(second_teacher["courses"][0]["id"], course)
                 self.assertEqual(client.get(route).status_code, 404)
@@ -176,6 +177,7 @@ class WorkflowTest(unittest.TestCase):
                 self.assertEqual(client.get(f"/api/lesson-templates/{private_template}/preview").status_code, 404)
                 self.assertEqual(client.get(f"/api/mind-maps/{mind_map}").status_code, 404)
                 self.assertEqual(client.get(f"/api/mind-map-templates/{map_template}").status_code, 404)
+                self.assertEqual(client.get(f"/api/exams/{exam}").status_code, 404)
                 self.assertEqual(client.post("/api/lessons", json={
                     "course_id": second_teacher["courses"][0]["id"], "title": "未授权模板",
                     "template_id": private_template,
@@ -242,6 +244,53 @@ class WorkflowTest(unittest.TestCase):
         payload.update(revision=updated["revision"], title="已更新的导图")
         self.assertEqual(client.put(path, json=payload).status_code, 200)
         return row["id"], template["id"]
+
+    def check_exams(self, client, course):
+        original = Document()
+        original.add_paragraph("某课程试卷")
+        original.sections[0].header.paragraphs[0].text = "保留的页眉"
+        original.add_heading("一、解答题", 1)
+        first = original.add_paragraph()
+        first.add_run("1. 原题（5分）").bold = True
+        original.add_paragraph("2. 相邻题（10分）")
+        original.add_paragraph("参考答案：原卷答案")
+        data = BytesIO()
+        original.save(data)
+        row = client.post("/api/exams/import", data={"course_id": course, "title": "原卷改编"}, files={
+            "file": ("exam.docx", data.getvalue()),
+        }).raise_for_status().json()
+        self.assertEqual(len(row["questions"]), 2)
+        self.assertTrue(row["answer_markers"])
+        route = f"/api/exams/{row['id']}"
+        key = row["questions"][0]["id"]
+        self.assertEqual(client.get(f"{route}/export/paper/docx?inline=true").status_code, 422)
+        self.assertEqual(client.put(f"{route}/review", json={"revision": row["revision"], "reviewed": True}).status_code, 422)
+        row = client.put(f"{route}/questions/{key}", json={
+            "revision": row["revision"], "kind": "written", "points": 5,
+        }).raise_for_status().json()
+        replacement = {"kind": "written", "stem": "请编写函数", "points": 25,
+                       "answer": "单独保存的答案", "tags": ["编程"]}
+        with patch("app.exams.generate", return_value=json.dumps(replacement)):
+            candidate = client.post(f"{route}/questions/{key}/revise", json={
+                "revision": row["revision"], "mode": "replace",
+            }).raise_for_status().json()
+        self.assertEqual(candidate["question"]["points"], 5)
+        updated = client.post(f"{route}/questions/{key}/adopt", json={
+            "revision": candidate["revision"], "question": candidate["question"],
+        }).raise_for_status().json()
+        self.assertEqual(updated["questions"][1]["text"], "2. 相邻题（10分）")
+        self.assertEqual(updated["questions"][0]["id"], key)
+        self.assertEqual(client.post(f"{route}/questions/{key}/adopt", json={
+            "revision": candidate["revision"], "question": candidate["question"],
+        }).status_code, 409)
+        paper = Document(BytesIO(client.get(f"{route}/document").raise_for_status().content))
+        self.assertEqual(paper.sections[0].header.paragraphs[0].text, "保留的页眉")
+        self.assertEqual(paper.paragraphs[2].text, "1. 请编写函数（5分）")
+        self.assertTrue(paper.paragraphs[2].runs[0].bold)
+        self.assertFalse(any(replacement["answer"] in p.text for p in paper.paragraphs))
+        answers = Document(BytesIO(client.get(f"{route}/export/answers/docx").raise_for_status().content))
+        self.assertTrue(any(replacement["answer"] in p.text for p in answers.paragraphs))
+        return row["id"]
 
     def check_lesson_templates(self, client, course, legacy_route):
         templates = "/api/lesson-templates"

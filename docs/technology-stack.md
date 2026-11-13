@@ -47,10 +47,14 @@
 
 编辑工具扩展继续使用已选的 SimpleMindMap。关联线和外框启用库自带插件，概要、图标和链接复用节点能力。附件引用课程资料库。公式预览声明现有锁文件中的 KaTeX 0.16.47 为直接依赖，按纯 LaTeX 输入在浏览器渲染。表格、代码块和双向链接保存在节点结构中，通过编辑器查看。Windows Chrome 已验证公式预览、节点保存重开及图形导出。[SimpleMindMap 节点内容](https://wanglin2.github.io/mind-map-docs/course/course2.html) · [知犀编辑工具](https://help.zhixi.com/faq/21585.html)
 
+### 教师试卷
+
+2026-11-13 确认复用 Vue 3 的 DOCX Editor 2.37.0、python-docx 和 LibreOffice Writer。Word 文件以 DOCX 为在线编辑格式，DOC 导入和导出经过 LibreOffice。试卷正文及题目元数据分别保存。优先按 Word 段落和编号提出题目范围，教师确认后用 Word 书签标识题目。单题修改仅写入确认的范围，参考答案单独保存。试卷题型按作答方式建模，专业细分采用标签。生成和单题修改复用现有 Chat Completions 接口。Windows Chrome 已验证书签定位、手动选区标记、DOCX 重开、PDF 预览和旧版 DOC 导出。[DOCX Editor 书签](https://www.docx-editor.dev/docs/2.x/guides/bookmarks) · [LibreOffice 转换格式](https://help.libreoffice.org/latest/en-US/text/shared/guide/convertfilters.html) · [ACL 2025 选择题研究](https://aclanthology.org/2025.findings-acl.432/) · [EMNLP 2026 干扰项研究](https://aclanthology.org/2026.findings-emnlp.2382/)
+
 ## 待验证和待选型
 
 - 资料向量检索的候选为 PostgreSQL + pgvector 与 Qwen3-Embedding。以真实中文课程样本比较证据召回、章节切分与引用页码后再确认。
 - 对话持久化、Agent 修改教案、耗时任务队列、数据库迁移、对象存储及生产部署需要单独验收。
-- 知识框架、PPT、试卷、批改、学情分析、数字人和语音分别进入组件选型流程。
+- 知识框架、PPT、批改、学情分析、数字人和语音分别进入组件选型流程。
 
 后续每个组件获批后，在本页记录日期、技术及版本、选择理由、运行条件和验证结果。依赖变更同时更新依赖文件和开发日志。

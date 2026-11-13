@@ -6,6 +6,10 @@ import Empty from '../components/Empty.vue'
 import Modal from '../components/Modal.vue'
 import PdfViewer from '../components/PdfViewer.vue'
 
+const props = defineProps({ exam: Boolean })
+const path = props.exam ? '/exam-templates' : '/lesson-templates'
+const back = props.exam ? '/exams' : '/lessons'
+const kind = props.exam ? '试卷' : '教案'
 const templates = ref([])
 const loading = ref(true)
 const busy = ref(false)
@@ -18,7 +22,7 @@ const file = ref(null)
 const page = ref(1)
 
 onMounted(async () => {
-  try { templates.value = await api('/lesson-templates') }
+  try { templates.value = await api(path) }
   catch (failure) { error.value = failure.message }
   finally { loading.value = false }
 })
@@ -54,14 +58,14 @@ async function submit() {
       const body = new FormData()
       body.append('file', file.value)
       body.append('title', title.value)
-      templates.value.unshift(await api('/lesson-templates', { method: 'POST', body }))
+      templates.value.unshift(await api(path, { method: 'POST', body }))
     } else if (action.value === 'rename') {
-      const template = await api(`/lesson-templates/${current.value.id}`, {
+      const template = await api(`${path}/${current.value.id}`, {
         method: 'PATCH', body: { title: title.value },
       })
       templates.value = templates.value.map((item) => item.id === template.id ? template : item)
     } else {
-      await api(`/lesson-templates/${current.value.id}`, { method: 'DELETE' })
+      await api(`${path}/${current.value.id}`, { method: 'DELETE' })
       templates.value = templates.value.filter((item) => item.id !== current.value.id)
     }
     action.value = ''
@@ -74,8 +78,8 @@ const labels = { upload: '上传 Word 模板', rename: '重命名模板', remove
 
 <template>
   <div class="page">
-    <RouterLink class="text-link back-link" to="/lessons"><ArrowLeft :size="16" /> 返回教案管理</RouterLink>
-    <header class="page-heading"><div><h1>Word 模板</h1><p>管理可在新教案中复用的 Word 文档。</p></div>
+    <RouterLink class="text-link back-link" :to="back"><ArrowLeft :size="16" /> 返回{{ kind }}管理</RouterLink>
+    <header class="page-heading"><div><h1>Word 模板</h1><p>管理可在新{{ kind }}中复用的 Word 文档。</p></div>
       <button class="button primary" @click="open('upload')"><Upload :size="17" /> 上传模板</button>
     </header>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
@@ -96,15 +100,15 @@ const labels = { upload: '上传 Word 模板', rename: '重命名模板', remove
         </tr></tbody>
       </table>
     </div>
-    <Empty v-else title="还没有 Word 模板" detail="上传学校的 DOC 或 DOCX，之后可在新建教案时选择。" />
+    <Empty v-else title="还没有 Word 模板" :detail="`上传学校的 DOC 或 DOCX，之后可在新建${kind}时选择。`" />
     <Modal :open="action === 'preview'" :title="current?.title || '模板预览'" wide @close="action = ''">
-      <PdfViewer v-if="current" :src="`/api/lesson-templates/${current.id}/preview`" v-model:page="page" />
+      <PdfViewer v-if="current" :src="`/api${path}/${current.id}/preview`" v-model:page="page" />
     </Modal>
     <Modal :open="!!labels[action]" :title="labels[action]" @close="!busy && (action = '')">
       <form class="stack" @submit.prevent="submit">
         <label v-if="action === 'upload'">Word 文件<input type="file" aria-label="选择 Word 模板" accept=".doc,.docx" required @change="selectFile"></label>
         <label v-if="action !== 'remove'">模板名称<input v-model.trim="title" maxlength="160" required></label>
-        <p v-else>删除「{{ current?.title }}」？已从该模板创建的教案仍可编辑。</p>
+        <p v-else>删除「{{ current?.title }}」？已从该模板创建的{{ kind }}仍可编辑。</p>
         <p v-if="formError" class="error" role="alert">{{ formError }}</p>
         <div class="dialog-actions">
           <button type="button" class="button secondary" :disabled="busy" @click="action = ''">取消</button>

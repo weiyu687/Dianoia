@@ -141,3 +141,37 @@ class MindMap(MindMapContent, Base):
 
 class MindMapTemplate(MindMapContent, Base):
     __tablename__ = "mind_map_templates"
+
+
+class Exam(Base):
+    __tablename__ = "exams"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=identifier)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id"), index=True)
+    title: Mapped[str] = mapped_column(String(160))
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    questions: Mapped[dict] = mapped_column(JSON, default=dict)
+    sources: Mapped[list] = mapped_column(JSON, default=list)
+    imported: Mapped[bool] = mapped_column(Boolean, default=False)
+    reviewed: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
+
+
+class ExamDocument(Base):
+    __tablename__ = "exam_documents"
+
+    exam_id: Mapped[str] = mapped_column(ForeignKey("exams.id", ondelete="CASCADE"), primary_key=True)
+    content: Mapped[bytes] = mapped_column(LargeBinary)
+
+
+class ExamTemplate(Base):
+    __tablename__ = "exam_templates"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=identifier)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    title: Mapped[str] = mapped_column(String(160))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    filename: Mapped[str] = mapped_column(String(255))
+    content: Mapped[bytes] = mapped_column(LargeBinary)

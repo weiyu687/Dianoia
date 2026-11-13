@@ -23,7 +23,9 @@ async function send() {
         messages: pending.slice(-20).map(({ role, content }) => ({ role, content })),
       },
     })
-    messages.value = [...pending, { role: 'assistant', content: response.text, maps: response.created_mind_maps }]
+    messages.value = [...pending, {
+      role: 'assistant', content: response.text, maps: response.created_mind_maps, exams: response.created_exams,
+    }]
     input.value = ''
     await nextTick()
     scrollTarget.value?.scrollIntoView({ block: 'nearest' })
@@ -41,6 +43,7 @@ async function send() {
         <div v-for="(message, index) in messages" :key="index" class="message" :class="message.role">
           {{ message.content }}
           <RouterLink v-for="map in message.maps" :key="map.id" class="text-link" :to="`/mind-maps/${map.id}`">打开导图「{{ map.title }}」</RouterLink>
+          <RouterLink v-for="exam in message.exams" :key="exam.id" class="text-link" :to="`/exams/${exam.id}`">打开试卷「{{ exam.title }}」</RouterLink>
         </div>
         <span ref="scrollTarget"></span>
       </div>

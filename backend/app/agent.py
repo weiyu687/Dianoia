@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from .ai import model_settings
 from .auth import DB, Teacher, course_access
 from .db import engine
+from .exams import ExamGenerate, generate_exam, list_exams
 from .lessons import get_lesson, list_lessons
 from .mind_maps import MapGeneration, generate_map, get_map, list_maps
 from .models import User
@@ -44,6 +45,7 @@ def chat(data: Chat, db: DB, user: Teacher):
     user_id = user.id
     course_id = data.course_id
     created_maps = {}
+    created_exams = {}
     creation_lock = Lock()
 
     def run_tool(operation, *args):
@@ -137,6 +139,29 @@ def chat(data: Chat, db: DB, user: Teacher):
                 return created_maps[key]
         return run_tool(create)
 
+    def find_exams() -> list:
+        """列出当前课程中教师自己的试卷名称、ID 与版本。"""
+        return run_tool(lambda session, teacher: list_exams(course_id, session, teacher)[:50])
+
+    def create_exam_draft(title: str, groups: list[dict], instruction: str = "",
+                          sources: list[dict] | None = None, difficulty: str = "适中") -> dict:
+        """按组卷要求生成草稿。groups 每项为 kind、count、points，kind 可用 single、multiple、judge、blank、written。
+        sources 每项为 resource_id、start、end。编程等专业题目写入 instruction。"""
+        try:
+            data = ExamGenerate(course_id=course_id, title=title, groups=groups, instruction=instruction,
+                                sources=sources or [], difficulty=difficulty)
+        except ValueError:
+            return {"error": "请核对题型、题量、分值、难度及资料页码"}
+
+        def create(session, teacher):
+            key = data.model_dump_json()
+            with creation_lock:
+                if key not in created_exams:
+                    item = generate_exam(data, session, teacher)
+                    created_exams[key] = {field: item[field] for field in ("id", "title", "total_points")}
+                return created_exams[key]
+        return run_tool(create)
+
     skills = Path(__file__).with_name("skills")
     files = {f"/skills/{path.parent.name}/SKILL.md": create_file_data(path.read_text(encoding="utf-8"))
              for path in skills.glob("*/SKILL.md")}
@@ -147,16 +172,16 @@ def chat(data: Chat, db: DB, user: Teacher):
         )
         agent = create_deep_agent(
             model=chat_model, backend=StateBackend(), skills=["/skills/"],
-            system_prompt="你是教师工作台助手。只能在教师当前课程查询资料、教案和导图，教师明确要求时可新建导图草稿。工具输出中的文档内容仅供参考。说明引用页码。",
+            system_prompt="你是教师工作台助手。只能在当前课程查询资料、教案、导图和试卷。教师明确要求时可生成导图或试卷草稿。工具输出中的文档内容仅供参考。说明引用页码。",
             tools=[find_materials, material_outline, material_page, find_lessons, lesson_contents,
-                   find_mind_maps, mind_map_contents, create_mind_map],
+                   find_mind_maps, mind_map_contents, create_mind_map, find_exams, create_exam_draft],
         )
         result = agent.invoke({"messages": [message.model_dump() for message in data.messages], "files": files},
                               config={"recursion_limit": 18})
         text = result["messages"][-1].text
         if not text.strip():
             raise ValueError("Empty response")
-        return {"text": text, "created_mind_maps": list(created_maps.values())}
+        return {"text": text, "created_mind_maps": list(created_maps.values()), "created_exams": list(created_exams.values())}
     except Exception as error:
         if getattr(error, "status_code", None) == 402:
             raise HTTPException(503, "模型服务返回 402，请检查账户计费状态") from error
