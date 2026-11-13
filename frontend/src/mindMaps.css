@@ -68,6 +68,8 @@ button.map-template-card:hover, .map-template-card:focus-within { border-color: 
 .map-footer { display: flex; flex-wrap: wrap; gap: 7px 16px; justify-content: space-between; padding: 7px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
 .map-footer kbd { margin-left: 4px; }
 .map-export-surface { position: fixed; top: 0; left: -20000px; width: 1200px; height: 800px; pointer-events: none; }
+.map-export-checkbox { display: flex; align-items: center; gap: 8px; }
+.map-export-checkbox input { width: 16px; height: 16px; accent-color: var(--button); }
 
 @media (max-width: 650px) {
   .map-editor-header { flex-wrap: wrap; }

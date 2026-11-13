@@ -8,6 +8,7 @@ import {
 import { api } from '../api'
 import { courseId } from '../session'
 import { canvasTheme, createCanvas, flatNodes, fromCanvas, layouts, nodeBadges, palettes, toCanvas } from '../mindMapCanvas'
+import { hasExportSources, mapExportOptions } from '../mindMapExport'
 import MapSources from '../components/MapSources.vue'
 import Modal from '../components/Modal.vue'
 import '../mindMaps.css'
@@ -249,6 +250,12 @@ function showDialog(mode, node = null) {
 
 async function submitDialog() {
   if (busy.value) return
+  if (dialog.value.mode === 'export') {
+    const { includePages } = dialog.value
+    dialog.value = null
+    await exportImage(includePages)
+    return
+  }
   const { mode, node, sources, title: templateTitle } = dialog.value
   dialogError.value = ''
   if (mode === 'sources') {
@@ -270,7 +277,14 @@ async function submitDialog() {
   finally { busy.value = false }
 }
 
-async function exportImage() {
+function openExport() {
+  if (hasExportSources(documentData.value)) {
+    dialogError.value = ''
+    dialog.value = { mode: 'export', includePages: false }
+  } else exportImage(false)
+}
+
+async function exportImage(includePages) {
   if (exporting.value || !engine) return
   exporting.value = true
   error.value = ''
@@ -282,7 +296,7 @@ async function exportImage() {
   document.body.appendChild(surface)
   let copy
   try {
-    copy = createCanvas(surface, documentData.value, { full: true, readonly: true })
+    copy = createCanvas(surface, documentData.value, mapExportOptions(documentData.value, resources.value, includePages))
     await new Promise((resolve) => copy.render(resolve))
     const image = await copy.doExport.png()
     const link = document.createElement('a')
@@ -308,7 +322,7 @@ async function exportImage() {
         <div class="actions map-file-actions">
           <button class="button subtle icon-only" aria-label="立即保存" title="立即保存" @click="flush"><Save :size="18" /></button>
           <button v-if="!template" class="button secondary" @click="showDialog('template')"><FilePlus2 :size="17" /> 存为模板</button>
-          <button class="button primary" :disabled="exporting" @click="exportImage"><Download :size="17" /> {{ exporting ? '正在导出' : '下载 PNG' }}</button>
+          <button class="button primary" :disabled="exporting" @click="openExport"><Download :size="17" /> {{ exporting ? '正在导出' : '下载 PNG' }}</button>
         </div>
       </template>
     </header>
@@ -416,12 +430,16 @@ async function exportImage() {
       </div>
       <footer class="map-footer"><span>{{ flatNodes(documentData.root).length }} 个主题</span><span><kbd>Tab</kbd> 子主题 <kbd>Enter</kbd> 同级主题 <kbd>Shift</kbd> + <kbd>Enter</kbd> 节点内换行</span></footer>
     </div>
-    <Modal :open="!!dialog" :wide="dialog?.mode === 'sources'" :title="dialog?.mode === 'template' ? '存为模板' : dialog?.node ? '挂载节点资料' : '挂载整图资料'" @close="!busy && (dialog = null)">
+    <Modal :open="!!dialog" :wide="dialog?.mode === 'sources'" :title="dialog?.mode === 'export' ? '下载 PNG' : dialog?.mode === 'template' ? '存为模板' : dialog?.node ? '挂载节点资料' : '挂载整图资料'" @close="!busy && (dialog = null)">
       <form v-if="dialog" class="stack" @submit.prevent="submitDialog">
         <MapSources v-if="dialog.mode === 'sources'" v-model="dialog.sources" :resources="resources" />
+        <template v-else-if="dialog.mode === 'export'">
+          <label class="map-export-checkbox"><input v-model="dialog.includePages" type="checkbox" aria-describedby="map-export-help"> 标注参考资料页码</label>
+          <p id="map-export-help" class="muted">资料名称集中列在图底。引用多份资料时，用编号区分各节点的页码来源。</p>
+        </template>
         <template v-else><label>模板名称<input v-model.trim="dialog.title" required maxlength="160"></label><p class="muted">模板保留当前结构、文字和样式。课程资料引用留在原导图。</p></template>
         <p v-if="dialogError" class="error" role="alert">{{ dialogError }}</p>
-        <div class="dialog-actions"><button type="button" class="button secondary" :disabled="busy" @click="dialog = null">取消</button><button type="submit" class="button primary" :disabled="busy">{{ busy ? '正在保存' : '保存' }}</button></div>
+        <div class="dialog-actions"><button type="button" class="button secondary" :disabled="busy" @click="dialog = null">取消</button><button type="submit" class="button primary" :disabled="busy">{{ dialog.mode === 'export' ? '下载' : busy ? '正在保存' : '保存' }}</button></div>
       </form>
     </Modal>
   </div>

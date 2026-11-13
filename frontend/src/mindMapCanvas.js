@@ -20,12 +20,12 @@ export const layouts = {
   organizationStructure: '组织结构图',
 }
 
-const fontFamily = 'Microsoft YaHei UI, PingFang SC, Noto Sans CJK SC, sans-serif'
+export const mapFontFamily = 'Microsoft YaHei UI, PingFang SC, Noto Sans CJK SC, sans-serif'
 const styleKeys = ['fillColor', 'color', 'borderColor', 'lineColor', 'fontSize', 'fontWeight', 'shape']
 
 export function canvasTheme(palette, dark = false) {
   const { root, fill, border, paper } = palettes[palette]
-  const node = { fontFamily, shape: 'roundedRectangle', borderWidth: 1 }
+  const node = { fontFamily: mapFontFamily, shape: 'roundedRectangle', borderWidth: 1 }
   return {
     backgroundColor: dark ? '#1d1d26' : paper,
     lineColor: dark ? border : root, lineWidth: 1.5, lineRadius: 9, paddingY: 8, paddingX: 13,
@@ -35,14 +35,16 @@ export function canvasTheme(palette, dark = false) {
   }
 }
 
-export function toCanvas(node, full = false) {
+const editorBadges = (node) => nodeBadges(node.note, node.sources)
+
+export function toCanvas(node, full = false, badges = editorBadges) {
   return {
     data: {
       uid: node.id, text: node.text, expand: full || node.expanded, dir: node.direction || undefined,
       ...node.style, mapNote: node.note, mapSources: node.sources,
-      tag: nodeBadges(node.note, node.sources),
+      tag: badges(node),
     },
-    children: node.children.map((child) => toCanvas(child, full)),
+    children: node.children.map((child) => toCanvas(child, full, badges)),
   }
 }
 
@@ -65,9 +67,9 @@ export function fromCanvas({ data, children }) {
 }
 
 export function createCanvas(element, document, options = {}) {
-  const { readonly = false, full = false, dark = false, ...overrides } = options
+  const { readonly = false, full = false, dark = false, badges, ...overrides } = options
   return new MindMap({
-    el: element, data: toCanvas(document.root, full), layout: document.layout,
+    el: element, data: toCanvas(document.root, full, badges), layout: document.layout,
     themeConfig: canvasTheme(document.palette, dark), readonly, fit: true,
     customCheckEnableShortcut: readonly ? () => false : undefined,
     fitPadding: 20, hoverRectColor: '#9c86f5', textAutoWrapWidth: 210,
