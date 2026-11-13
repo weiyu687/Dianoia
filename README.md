@@ -51,7 +51,9 @@ npm run dev
 
 Word 资料上传需要 LibreOffice Writer。系统会查找 PATH、Windows 默认安装目录及数据目录下的 `tools/LibreOffice/program`，也可以通过 `DIANOIA_SOFFICE` 指定可执行文件。Word 统一转换为 PDF 后预览、读取书签和逐页提取正文。重新打开此前仅保存了文本的 Word 资料时，系统会用原件补做转换，保留原资料记录。
 
-现有根目录 `.env` 中的 `MODEL_API_URL`、`MODEL_NAME` 和 `MODEL_API_KEY` 也可继续使用。优先采用对应的 `DIANOIA_*` 配置。
+现有根目录 `.env` 中的 `MODEL_API_URL`、`MODEL_NAME` 和 `MODEL_API_KEY` 也可继续使用。优先采用对应的 `DIANOIA_*` 配置。后端在启动时读取 `.env`。保存模型配置后重启 Uvicorn，开发模式的 `--reload` 也需要这一步。
+
+超算互联网可使用 `https://api.scnet.cn/api/llm/v1` 作为基础地址。模型名填写控制台列出的模型 ID，Token Plan 套餐使用专属 API Key。[模型 API 接入文档](https://www.scnet.cn/ac/openapi/doc/2.0/moduleapi/tutorial/apicall.html) · [Token Plan 配置说明](https://www.scnet.cn/help/docs/mainsite/mass/plans/faq.html)
 
 生产部署应让前端与 `/api` 同源，并用 TLS、私有持久卷和 PostgreSQL。当前迭代先验证单校工作流，部署前需要完成数据库迁移、备份、文件处理隔离和学校真实账号接入。
 

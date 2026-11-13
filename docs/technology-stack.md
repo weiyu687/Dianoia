@@ -1,6 +1,6 @@
 # Dianoia 技术栈与选型记录
 
-更新于 2026-11-12。此文档记录实际依赖、外部运行条件及尚待选型的组件。前端依赖以 `frontend/package.json` 和 `frontend/package-lock.json` 为准，后端依赖以 `backend/requirements.txt` 和 `backend/requirements-agent.txt` 为准。
+更新于 2026-11-13。此文档记录实际依赖、外部运行条件及尚待选型的组件。前端依赖以 `frontend/package.json` 和 `frontend/package-lock.json` 为准，后端依赖以 `backend/requirements.txt` 和 `backend/requirements-agent.txt` 为准。
 
 ## 当前技术栈
 
@@ -30,6 +30,7 @@
 | 2026-11-12 | 首版教案编辑 | 采用 Tiptap 验证结构化草稿和光标续写。分页模板编辑获批后迁入直接读写 DOCX 的编辑器。 |
 | 2026-11-12 | Word 分页编辑和模板 | 用户确认采用 DOCX Editor 的 Vue 与 Core 包。采用 Apache-2.0 的分页、编辑与保存能力，复用现有 LibreOffice 处理 DOC 与 PDF。在隔离环境中验证学校旧版 Word 模板转换、浏览器 4 页展示、表格编辑保存和导出页数。 |
 | 2026-11-12 | Word 模板 AI 填充 | 使用现有模型的 JSON 响应按栏目输出，python-docx 按 `{{栏目名}}`、已知标题说明和相邻空白单元格定位写入，保留已有布局。未识别到教学栏目时在模板末尾追加生成内容。 |
+| 2026-11-13 | 模型服务配置验证 | 超算互联网 Token Plan 的 `DeepSeek-V4.1-Flash-1017-Event` 复用现有 OpenAI Chat Completions 接口。使用套餐专属密钥，修改 `.env` 后重启后端。验证了模型列表、教案生成、写作和 Agent 工具调用。 |
 
 中文字体和复杂对象可能影响分页。新增学校模板时可用原件对照在线编辑和 PDF 导出。[Vue 组合接口](https://www.docx-editor.dev/docs/2.x/vue/composition) · [DOCX 格式兼容](https://www.docx-editor.dev/docs/2.x/docx-fidelity) · [LibreOffice 转换格式](https://help.libreoffice.org/latest/en-US/text/shared/guide/convertfilters.html)
 
