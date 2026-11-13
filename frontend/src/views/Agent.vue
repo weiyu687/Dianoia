@@ -18,9 +18,12 @@ async function send() {
   try {
     const pending = [...messages.value, { role: 'user', content: value }]
     const response = await api('/agent/chat', {
-      method: 'POST', body: { course_id: courseId.value, messages: pending.slice(-20) },
+      method: 'POST', body: {
+        course_id: courseId.value,
+        messages: pending.slice(-20).map(({ role, content }) => ({ role, content })),
+      },
     })
-    messages.value = [...pending, { role: 'assistant', content: response.text }]
+    messages.value = [...pending, { role: 'assistant', content: response.text, maps: response.created_mind_maps }]
     input.value = ''
     await nextTick()
     scrollTarget.value?.scrollIntoView({ block: 'nearest' })
@@ -34,7 +37,13 @@ async function send() {
     <header class="page-heading"><div><h1>教师 Agent</h1><p>{{ course.name }}</p></div><button class="button secondary" :disabled="loading || !messages.length" @click="messages = []; error = ''"><Plus :size="16" /> 新对话</button></header>
     <div class="agent-body">
       <div v-if="!messages.length" class="agent-empty"><span class="agent-icon"><MessageCircle :size="28" /></span><h2>教师 Agent</h2></div>
-      <div v-else class="conversation" aria-live="polite"><div v-for="(message, index) in messages" :key="index" class="message" :class="message.role">{{ message.content }}</div><span ref="scrollTarget"></span></div>
+      <div v-else class="conversation" aria-live="polite">
+        <div v-for="(message, index) in messages" :key="index" class="message" :class="message.role">
+          {{ message.content }}
+          <RouterLink v-for="map in message.maps" :key="map.id" class="text-link" :to="`/mind-maps/${map.id}`">打开导图「{{ map.title }}」</RouterLink>
+        </div>
+        <span ref="scrollTarget"></span>
+      </div>
       <form class="composer" @submit.prevent="send">
         <textarea v-model="input" aria-label="对话内容" placeholder="输入消息" rows="3" maxlength="5000" @keydown.ctrl.enter.prevent="send"></textarea>
         <p v-if="error" class="error" role="alert">{{ error }}</p>

@@ -167,16 +167,64 @@ class WorkflowTest(unittest.TestCase):
                 self.assertEqual(suggestion["text"], "函数设计的重要要求。")
 
                 private_template = self.check_lesson_templates(client, course, route)
+                mind_map, map_template = self.check_mind_maps(client, course, resource["id"])
                 second_teacher = login("t02", "teacher")
                 self.assertNotEqual(second_teacher["courses"][0]["id"], course)
                 self.assertEqual(client.get(route).status_code, 404)
                 self.assertEqual(client.get(f"/api/resources/{resource['id']}/file").status_code, 404)
                 self.assertEqual(client.get("/api/lesson-templates").json(), [])
                 self.assertEqual(client.get(f"/api/lesson-templates/{private_template}/preview").status_code, 404)
+                self.assertEqual(client.get(f"/api/mind-maps/{mind_map}").status_code, 404)
+                self.assertEqual(client.get(f"/api/mind-map-templates/{map_template}").status_code, 404)
                 self.assertEqual(client.post("/api/lessons", json={
                     "course_id": second_teacher["courses"][0]["id"], "title": "未授权模板",
                     "template_id": private_template,
                 }).status_code, 404)
+
+    def check_mind_maps(self, client, course, resource_id):
+        maps, templates = "/api/mind-maps", "/api/mind-map-templates"
+        source = {"resource_id": resource_id, "start": 2, "end": 2}
+        self.assertGreaterEqual(len(client.get(templates).raise_for_status().json()["builtin"]), 8)
+
+        def model(_, prompt, structured):
+            self.assertTrue(structured)
+            pages = json.loads(prompt)["资料"]
+            self.assertEqual([page["页码"] for page in pages], [2])
+            self.assertIn("Repeatable read", pages[0]["正文"])
+            return '```json\n' + json.dumps({"root": {"text": "中心主题", "children": [
+                {"text": "隔离级别", "pages": ["P1", "P1", "P2"], "children": [{"text": "可重复读"}]},
+            ]}}) + '\n```'
+
+        with patch("app.mind_maps.generate", side_effect=model):
+            row = client.post(f"{maps}/generate", json={
+                "course_id": course, "title": "数据库事务", "sources": [source],
+            }).raise_for_status().json()
+        path = f"{maps}/{row['id']}"
+        document = row["document"]
+        branch = document["root"]["children"][0]
+        self.assertEqual(branch["sources"], [source])
+        self.assertEqual(branch["children"][0]["text"], "可重复读")
+        branch["style"] = {"shape": "diamond"}
+        payload = {"title": row["title"], "revision": row["revision"], "document": document}
+        updated = client.put(path, json=payload).raise_for_status().json()
+        self.assertEqual(updated["revision"], 2)
+        self.assertEqual(client.put(path, json=payload).status_code, 409)
+        key = {"Idempotency-Key": str(uuid4())}
+        copy = client.post(f"{path}/copy", headers=key).raise_for_status().json()
+        self.assertEqual(client.post(f"{path}/copy", headers=key).raise_for_status().json()["id"], copy["id"])
+        template = client.post(templates, json={"title": "个人结构", "map_id": row["id"]}).raise_for_status().json()
+        self.assertEqual(template["document"]["sources"], [])
+        self.assertEqual(template["document"]["root"]["children"][0]["sources"], [])
+        derived = client.post(maps, json={
+            "course_id": course, "title": "模板副本", "template_id": template["id"],
+        }).raise_for_status().json()
+        self.assertEqual(derived["document"]["root"]["children"][0]["style"]["shape"], "diamond")
+        self.assertEqual(derived["document"]["root"]["text"], "模板副本")
+        self.assertEqual(client.get(f"{templates}/{template['id']}").json()["document"]["root"]["text"], "数据库事务")
+        client.delete(f"/api/resources/{resource_id}").raise_for_status()
+        payload.update(revision=updated["revision"], title="已更新的导图")
+        self.assertEqual(client.put(path, json=payload).status_code, 200)
+        return row["id"], template["id"]
 
     def check_lesson_templates(self, client, course, legacy_route):
         templates = "/api/lesson-templates"

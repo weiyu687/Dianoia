@@ -1,6 +1,6 @@
 <script setup>
 import { onMounted, ref } from 'vue'
-import { BookOpen, House, LibraryBig, LogOut, MessageCircle, PanelLeft } from 'lucide-vue-next'
+import { BookOpen, House, LibraryBig, LogOut, MessageCircle, PanelLeft, Workflow } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { changeCourse, courseId, logout, restore, user } from './session'
 import Brand from './components/Brand.vue'
@@ -16,6 +16,7 @@ const items = [
   { to: '/', label: '首页', icon: House, routes: ['home'] },
   { to: '/resources', label: '资料库', icon: LibraryBig, routes: ['library', 'resource'] },
   { to: '/lessons', label: '教案', icon: BookOpen, routes: ['lessons', 'lesson', 'lessonTemplates'] },
+  { to: '/mind-maps', label: '思维导图', icon: Workflow, routes: ['mindMaps', 'mindMap', 'mindMapTemplate'] },
   { to: '/agent', label: '教师 Agent', icon: MessageCircle, routes: ['agent'] },
 ]
 
@@ -26,6 +27,14 @@ onMounted(async () => {
 })
 
 function selectCourse(event) {
+  const next = event.target.value
+  if (route.name === 'mindMap' || route.name === 'mindMapTemplate') {
+    router.push('/mind-maps').then((failure) => {
+      if (!failure) changeCourse(next)
+      else event.target.value = courseId.value
+    })
+    return
+  }
   changeCourse(event.target.value)
   if (route.name === 'resource') router.push('/resources')
   if (route.name === 'lesson') router.push('/lessons')

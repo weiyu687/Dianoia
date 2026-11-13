@@ -31,6 +31,7 @@
 | 2026-11-12 | Word 分页编辑和模板 | 用户确认采用 DOCX Editor 的 Vue 与 Core 包。采用 Apache-2.0 的分页、编辑与保存能力，复用现有 LibreOffice 处理 DOC 与 PDF。在隔离环境中验证学校旧版 Word 模板转换、浏览器 4 页展示、表格编辑保存和导出页数。 |
 | 2026-11-12 | Word 模板 AI 填充 | 使用现有模型的 JSON 响应按栏目输出，python-docx 按 `{{栏目名}}`、已知标题说明和相邻空白单元格定位写入，保留已有布局。未识别到教学栏目时在模板末尾追加生成内容。 |
 | 2026-11-13 | 模型服务配置验证 | 超算互联网 Token Plan 的 `DeepSeek-V4.1-Flash-1017-Event` 复用现有 OpenAI Chat Completions 接口。使用套餐专属密钥，修改 `.env` 后重启后端。验证了模型列表、教案生成、写作和 Agent 工具调用。 |
+| 2026-11-13 | 教师思维导图和模板 | 用户确认 Vue 3 接入 MIT 许可的 `simple-mind-map` 0.14.0-fix.3，按路由加载。相比 AntV X6，直接复用主题编辑、布局、拖拽和图片导出。FastAPI、SQLAlchemy 和现有模型接口处理版本、资料授权及结构化生成。内置教育模板使用版本化 JSON，个人模板独立保存。 |
 
 中文字体和复杂对象可能影响分页。新增学校模板时可用原件对照在线编辑和 PDF 导出。[Vue 组合接口](https://www.docx-editor.dev/docs/2.x/vue/composition) · [DOCX 格式兼容](https://www.docx-editor.dev/docs/2.x/docx-fidelity) · [LibreOffice 转换格式](https://help.libreoffice.org/latest/en-US/text/shared/guide/convertfilters.html)
 
@@ -41,6 +42,8 @@
 模板填充沿用目标段落的字体、字号与行距。编辑器内采纳多段文字或表格时，后端用 python-docx 生成含中文字体字段的 Word 片段，通过固定版本 DOCX Editor 的富文本粘贴写入。升级编辑器时验证片段粘贴、字体与段落格式。[DOCX 富文本粘贴与格式兼容](https://www.docx-editor.dev/docs/2.x/docx-fidelity)
 
 空白 DOCX 和无模板生成的教案使用显式中文字体与 `zh-CN` 文档语言。归档和恢复使用状态接口更新同一教案。复制接口使用 UUID 请求键识别同一次复制的重试。
+
+思维导图保存平台定义的纯文本节点、样式和已授权资料引用。Vue 适配器负责与绘图库交换节点数据。浏览器生成 PNG，默认按 2 倍像素密度导出，并按浏览器画布上限缩放。已在 Windows Chrome 验证中文多行输入、分支换父节点、自动保存、模板副本、来源跳页和完整图幅导出。已验证真实模型按资料页生成和 Agent 创建工具。[SimpleMindMap](https://wanglin2.github.io/mind-map-docs/start/introduction.html) · [AntV X6 导图示例](https://x6.antv.antgroup.com/en/examples/showcase/practices/mindmap/)
 
 ## 待验证和待选型
 

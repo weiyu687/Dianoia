@@ -6,7 +6,8 @@ import { api, download, formatSize } from '../api'
 import ResourceOutline from '../components/ResourceOutline.vue'
 import PdfViewer from '../components/PdfViewer.vue'
 
-const id = String(useRoute().params.id)
+const route = useRoute()
+const id = String(route.params.id)
 const row = ref(null)
 const page = ref(1)
 const pdf = ref(null)
@@ -43,6 +44,8 @@ onMounted(async () => {
     nodes.value = row.value.outline
     if (needsWordPreview.value) await convertWord()
     else await getText()
+    const requestedPage = Number(route.query.page)
+    if (Number.isInteger(requestedPage) && requestedPage >= 1 && requestedPage <= row.value.page_count) jump(requestedPage)
   } catch (failure) { error.value = failure.message }
 })
 
