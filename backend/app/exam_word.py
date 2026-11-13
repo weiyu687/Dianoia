@@ -1,13 +1,17 @@
 import re
 from copy import deepcopy
 from dataclasses import dataclass
+from itertools import groupby
 
+from docx.enum.table import WD_TABLE_ALIGNMENT, WD_CELL_VERTICAL_ALIGNMENT
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+from docx.shared import Mm, Pt, RGBColor
 from docx.text.paragraph import Paragraph
 from fastapi import HTTPException
 
-from .lessons import chinese_lesson_document
+from .lessons import chinese_lesson_document, set_chinese_typeface
 from .models import identifier
 
 TYPES = {"single": "单项选择题", "multiple": "多项选择题", "judge": "判断题", "blank": "填空题", "written": "解答题"}
@@ -188,16 +192,141 @@ def detect(document):
     return result
 
 
-def default_paper(title, course_name):
-    document = chinese_lesson_document()
-    document.add_heading(title, 0)
-    document.add_paragraph(f"课程：{course_name}")
-    document.add_paragraph("姓名：________________　学号：________________　班级：________________")
-    document.add_paragraph("考试说明：请按题目要求作答。")
-    table = document.add_table(rows=2, cols=3)
+def ensure_body_paragraph(document):
+    body = document.element.body
+    last = next((element for element in reversed(body) if element.tag != qn("w:sectPr")), None)
+    if last is not None and last.tag != qn("w:tbl"):
+        return False
+    document.add_paragraph()
+    return True
+
+
+def exam_field(paragraph, field):
+    run = paragraph.add_run()
+    element = OxmlElement("w:fldSimple")
+    element.set(qn("w:instr"), field)
+    run._r.addnext(element)
+
+
+def heading_table(document, rows, widths, *, centered=False):
+    table = document.add_table(rows=len(rows), cols=len(widths))
     table.style = "Table Grid"
-    for cell, label in zip(table.rows[0].cells, ("总分", "实得分", "阅卷人")):
-        cell.text = label
+    table.autofit = False
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    for column, width in zip(table.columns, widths):
+        column.width = Mm(width)
+    for row, values in zip(table.rows, rows):
+        row.height = Mm(8)
+        for cell, text, width in zip(row.cells, values, widths):
+            cell.width = Mm(width)
+            cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+            paragraph = cell.paragraphs[0]
+            paragraph.paragraph_format.space_after = Pt(0)
+            if centered:
+                paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            paragraph.add_run(text)
+    return table
+
+
+def exam_layout():
+    document = chinese_lesson_document()
+    section = document.sections[0]
+    section.page_width, section.page_height = Mm(210), Mm(297)
+    section.left_margin = section.right_margin = Mm(23)
+    section.top_margin, section.bottom_margin = Mm(21), Mm(18)
+    document.styles["Normal"].font.size = Pt(11)
+    document.styles["Normal"].paragraph_format.space_after = Pt(5)
+    footer = section.footer.paragraphs[0]
+    footer.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    footer.add_run("第 ")
+    exam_field(footer, "PAGE")
+    footer.add_run(" 页　共 ")
+    exam_field(footer, "NUMPAGES")
+    footer.add_run(" 页")
+    return document
+
+
+def exam_heading(document, text, size, *, color="000000"):
+    paragraph = document.add_paragraph()
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    paragraph.paragraph_format.space_after = Pt(9)
+    run = paragraph.add_run(text)
+    set_chinese_typeface(run._r.get_or_add_rPr(), "黑体")
+    run.bold, run.font.size, run.font.color.rgb = True, Pt(size), RGBColor.from_string(color)
+
+
+def default_paper(title, course_name, *, school="", teacher="", term="", class_name="", groups=()):
+    document = exam_layout()
+    for text, size in ((f"{school}考试试卷", 23), (title, 15)):
+        exam_heading(document, text, size)
+    heading_table(document, [
+        (f"课程名称：{course_name}", f"学期：{term or '________________'}"),
+        (f"任课教师：{teacher or '________________'}", f"考试班级：{class_name or '________________'}"),
+        ("考试时间：________________", "考试时长：________ 分钟"),
+        ("考试方式：□ 闭卷　□ 开卷", "试卷类别：□ A 卷　□ B 卷"),
+        ("姓名：________________", "学号：________________"),
+    ], (82, 82))
+    document.add_paragraph()
+    labels = list("一二三四五")[:len(groups)] if groups else list("一二三四五")
+    subtotal = [str(group.count * group.points) for group in groups] if groups else [""] * len(labels)
+    total = str(sum(group.count * group.points for group in groups)) if groups else ""
+    column_count = len(labels) + 2
+    heading_table(document, [
+        ["题号", *labels, "总分"], ["满分", *subtotal, total],
+        ["得分", *([""] * (column_count - 1))], ["阅卷人", *([""] * (column_count - 1))],
+    ], (30, *([134 / (column_count - 1)] * (column_count - 1))), centered=True)
+    document.add_paragraph("考试说明：请按题号顺序作答，按监考要求填写个人信息。")
+    document.add_paragraph()
+    return document
+
+
+def answer_paper(title, course, teacher, questions, *, school="", term="", class_name=""):
+    document = exam_layout()
+    exam_heading(document, f"{school}考试参考答案", 23, color="9E2525")
+    exam_heading(document, title, 15)
+    heading_table(document, [
+        (f"课程名称：{course}", f"学期：{term or '________________'}"),
+        (f"任课教师：{teacher}", f"考试班级：{class_name or '________________'}"),
+        (f"题目总分：{sum(question['points'] or 0 for question in questions)} 分", ""),
+    ], (82, 82))
+    document.add_paragraph()
+    groups = {}
+    for question in questions:
+        kind = question["kind"]
+        groups[kind] = groups.get(kind, 0) + (question["points"] or 0)
+    if groups:
+        heading_table(document, [("题型", "分值"), *((TYPES[kind], str(points)) for kind, points in groups.items())],
+                      (82, 82), centered=True)
+    for kind, entries in groupby(questions, key=lambda question: question["kind"]):
+        group = list(entries)
+        heading = document.add_heading(TYPES[kind], 1)
+        heading.runs[0].font.color.rgb = RGBColor(0, 0, 0)
+        objective = kind in {"single", "multiple", "judge"}
+        if objective:
+            for start in range(0, len(group), 8):
+                batch = group[start:start + 8]
+                numbers = []
+                for index, question in enumerate(batch, start=start + 1):
+                    match = PREFIX.match(question["text"])
+                    numbers.append(re.search(r"\d+", match[0])[0] if match else str(index))
+                answers = [question["answer"] or "待补充" for question in batch]
+                heading_table(document, [("题号", *numbers), ("答案", *answers)],
+                              (24, *([140 / len(batch)] * len(batch))), centered=True)
+        for index, question in enumerate(group, start=1):
+            if objective and not question["explanation"]:
+                continue
+            first = question["text"].splitlines()
+            text = first[0] if first else "未填写题干"
+            document.add_paragraph(text if PREFIX.match(text) else f"{index}. {text}")
+            if not objective:
+                paragraph = document.add_paragraph()
+                paragraph.add_run("参考答案　").bold = True
+                paragraph.add_run(question["answer"] or "待补充").font.color.rgb = RGBColor.from_string("204D86")
+            if question["explanation"]:
+                paragraph = document.add_paragraph()
+                paragraph.add_run("解析与评分要点　").bold = True
+                paragraph.add_run(question["explanation"])
+    ensure_body_paragraph(document)
     return document
 
 
@@ -216,6 +345,7 @@ def add_questions(document, questions, *, use_template=False):
         kind = question.kind
         if kind not in counts:
             heading = document.add_heading(TYPES[kind], level=1)
+            heading.runs[0].font.color.rgb = RGBColor(0, 0, 0)
             if anchor is not None:
                 anchor.addprevious(heading._p)
             counts[kind] = 0
@@ -232,8 +362,6 @@ def add_questions(document, questions, *, use_template=False):
             paragraph = document.add_paragraph()
             if anchor is not None:
                 anchor.addprevious(paragraph._p)
-    if not use_template and document.tables:
-        document.tables[0].cell(1, 0).text = str(sum(question.points for question in questions))
     if anchor is not None:
         anchor.getparent().remove(anchor)
     return metadata

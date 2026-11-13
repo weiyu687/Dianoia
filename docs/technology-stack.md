@@ -53,6 +53,8 @@
 
 ## 待验证和待选型
 
+- 答题卡拟延用 DOCX Editor、python-docx 和 LibreOffice，使 Word 版可调整行高和边框。LaTeX 另评估 XeLaTeX 与 `ctexart` 或 `exam-zh` 的中文排版、公式及答题区。TeX Live 2024 已通过本地最小样例编译，包含中文、分式、横线和作答框。产品接入和正式模板待确认。[CTAN exam-zh](https://ctan.org/tex-archive/macros/xetex/latex/exam-zh)
+
 - 资料向量检索的候选为 PostgreSQL + pgvector 与 Qwen3-Embedding。以真实中文课程样本比较证据召回、章节切分与引用页码后再确认。
 - 对话持久化、Agent 修改教案、耗时任务队列、数据库迁移、对象存储及生产部署需要单独验收。
 - 知识框架、PPT、批改、学情分析、数字人和语音分别进入组件选型流程。

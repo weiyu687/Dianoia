@@ -1,4 +1,5 @@
 import json
+import os
 from io import BytesIO
 from pathlib import Path
 from typing import Annotated, Literal
@@ -12,9 +13,9 @@ from sqlalchemy.orm import defer
 
 from .ai import generate
 from .auth import DB, Teacher, course_access
-from .exam_word import PREFIX, TYPES, add_questions, answer_marked, default_paper, detect, ranges, replace_question
-from .lessons import Source, Title, chinese_lesson_document, lesson_sources, serialize_docx
-from .models import Course, Exam, ExamDocument, ExamTemplate, now
+from .exam_word import add_questions, answer_marked, answer_paper, default_paper, detect, ensure_body_paragraph, ranges, replace_question
+from .lessons import Source, Title, lesson_sources, serialize_docx
+from .models import ClassGroup, Course, Exam, ExamAnswerDocument, ExamDocument, ExamTemplate, now
 from .word import DOCX_MIME, convert_word, read_word_upload, word_pdf
 
 router = APIRouter(prefix="/api", tags=["exams"])
@@ -58,6 +59,7 @@ class ExamCreate(BaseModel):
     title: Title
     template_id: str | None = Field(default=None, max_length=32)
     sources: list[Source] = Field(default_factory=list, max_length=12)
+    class_code: str | None = Field(default=None, max_length=64)
 
 
 class Blueprint(BaseModel):
@@ -161,12 +163,16 @@ def has_answer_markers(document):
     )
 
 
-def store(db, user, data, document, *, questions=None, imported=False, reviewed=False):
+def store(db, user, data, document, *, questions=None, imported=False, reviewed=False, answer=None):
+    ensure_body_paragraph(document)
     row = Exam(owner_id=user.id, course_id=data.course_id, title=data.title, imported=imported,
                reviewed=reviewed, questions=questions or {}, sources=[source.model_dump() for source in data.sources])
     db.add(row)
     db.flush()
     db.add(ExamDocument(exam_id=row.id, content=serialize_docx(document)))
+    if answer is not None:
+        content, current = answer
+        db.add(ExamAnswerDocument(exam_id=row.id, content=content, based_on_revision=1 if current else 0))
     db.commit()
     return row_view(row, document)
 
@@ -196,6 +202,32 @@ def parse_model(raw):
     return json.loads(raw)
 
 
+def course_classes(db, course_id):
+    return list(db.scalars(select(ClassGroup).where(ClassGroup.course_id == course_id).order_by(ClassGroup.name, ClassGroup.code)))
+
+
+def school_fields():
+    return {"school": os.getenv("DIANOIA_SCHOOL_NAME", "").strip()[:120],
+            "term": os.getenv("DIANOIA_ACADEMIC_TERM", "").strip()[:80]}
+
+
+def create_default_paper(db, user, data, groups=()):
+    course = db.get(Course, data.course_id)
+    classes = course_classes(db, course.id)
+    class_name = next((row.name for row in classes if row.code == data.class_code), "")
+    if data.class_code and not class_name:
+        raise HTTPException(422, "请选择当前课程的教学班")
+    if data.class_code is None and len(classes) == 1:
+        class_name = classes[0].name
+    return default_paper(data.title, course.name, teacher=user.name, class_name=class_name, groups=groups, **school_fields())
+
+
+@router.get("/exams/course-fields")
+def exam_course_fields(course_id: int, db: DB, user: Teacher):
+    course_access(db, user, course_id)
+    return [{"code": row.code, "name": row.name} for row in course_classes(db, course_id)]
+
+
 @router.get("/exams")
 def list_exams(course_id: int, db: DB, user: Teacher):
     course_access(db, user, course_id)
@@ -211,7 +243,7 @@ def create_exam(data: ExamCreate, db: DB, user: Teacher):
     if data.template_id:
         document = decode(owned_template(db, user, data.template_id).content)
         return store(db, user, data, document, questions=detect(document), imported=True)
-    return store(db, user, data, default_paper(data.title, db.get(Course, data.course_id).name), reviewed=True)
+    return store(db, user, data, create_default_paper(db, user, data), reviewed=True)
 
 
 @router.post("/exams/import", status_code=201)
@@ -228,7 +260,8 @@ def generate_exam(data: ExamGenerate, db: DB, user: Teacher):
     course_access(db, user, data.course_id)
     context, _, _ = lesson_sources(db, user, data.course_id, data.sources)
     course = db.get(Course, data.course_id)
-    document = decode(owned_template(db, user, data.template_id).content) if data.template_id else default_paper(data.title, course.name)
+    document = (decode(owned_template(db, user, data.template_id).content) if data.template_id
+                else create_default_paper(db, user, data, data.groups))
     desired = [group.kind for group in data.groups for _ in range(group.count)]
     points = {group.kind: group.points for group in data.groups}
     numbered_slots = {}
@@ -278,7 +311,11 @@ def exam_document(exam_id: str, db: DB, user: Teacher, revision: int | None = No
     row = owned(db, user, exam_id)
     if revision is not None:
         assert_revision(row, revision)
-    return Response(stored_document(db, row).content, media_type=DOCX_MIME)
+    content = stored_document(db, row).content
+    document = decode(content)
+    if ensure_body_paragraph(document):
+        content = serialize_docx(document)
+    return Response(content, media_type=DOCX_MIME)
 
 
 @router.put("/exams/{exam_id}/document")
@@ -289,6 +326,8 @@ def save_document(exam_id: str, db: DB, user: Teacher, file: Annotated[UploadFil
     if not title.strip():
         raise HTTPException(422, "请填写试卷名称")
     _, content, document = read_word_upload(file)
+    if ensure_body_paragraph(document):
+        content = serialize_docx(document)
     stored = stored_document(db, row)
     questions = {key: value for key, value in row.questions.items() if key in ranges(document)}
     changed = stored.content != content
@@ -310,8 +349,11 @@ def rename_exam(exam_id: str, data: Rename, db: DB, user: Teacher):
 def copy_exam(exam_id: str, db: DB, user: Teacher):
     row = owned(db, user, exam_id)
     data = ExamCreate(course_id=row.course_id, title=f"{row.title[:156]}（副本）", sources=row.sources)
-    return store(db, user, data, decode(stored_document(db, row).content), questions=row.questions,
-                 imported=row.imported, reviewed=row.reviewed)
+    document = decode(stored_document(db, row).content)
+    saved = db.get(ExamAnswerDocument, exam_id)
+    answer = (saved.content, saved.based_on_revision == row.revision) if saved else None
+    return store(db, user, data, document, questions=row.questions, imported=row.imported,
+                 reviewed=row.reviewed, answer=answer)
 
 
 @router.delete("/exams/{exam_id}", status_code=204)
@@ -415,6 +457,52 @@ def update_sources(exam_id: str, data: ExamSources, db: DB, user: Teacher):
     return row_view(row, decode(stored_document(db, row).content))
 
 
+def generated_answers(db, user, row):
+    document = decode(stored_document(db, row).content)
+    questions = row_view(row, document)["questions"]
+    first_table = next(iter(document.tables), None)
+    class_name = next((cell.text.removeprefix("考试班级：").strip()
+                       for line in first_table.rows for cell in line.cells
+                       if cell.text.startswith("考试班级：")), "") if first_table is not None else ""
+    return serialize_docx(answer_paper(row.title, db.get(Course, row.course_id).name, user.name,
+                                     questions, class_name=class_name, **school_fields()))
+
+
+@router.get("/exams/{exam_id}/answers")
+def answer_state(exam_id: str, db: DB, user: Teacher):
+    row = owned(db, user, exam_id)
+    saved = db.get(ExamAnswerDocument, exam_id)
+    return {"revision": row.revision, "saved": saved is not None,
+            "stale": bool(saved and saved.based_on_revision != row.revision)}
+
+
+@router.get("/exams/{exam_id}/answers/document")
+def answer_document(exam_id: str, db: DB, user: Teacher, revision: int, regenerate: bool = False):
+    row = owned(db, user, exam_id)
+    assert_revision(row, revision)
+    saved = db.get(ExamAnswerDocument, exam_id)
+    content = saved.content if saved and not regenerate else generated_answers(db, user, row)
+    return Response(content, media_type=DOCX_MIME)
+
+
+@router.put("/exams/{exam_id}/answers/document")
+def save_answer_document(exam_id: str, db: DB, user: Teacher, file: Annotated[UploadFile, File()],
+                         revision: Annotated[int, Form(ge=1)]):
+    row = owned(db, user, exam_id)
+    assert_revision(row, revision)
+    _, content, document = read_word_upload(file)
+    if ensure_body_paragraph(document):
+        content = serialize_docx(document)
+    version(db, row, revision)
+    saved = db.get(ExamAnswerDocument, exam_id)
+    if saved is None:
+        saved = ExamAnswerDocument(exam_id=exam_id)
+        db.add(saved)
+    saved.content, saved.based_on_revision = content, revision + 1
+    db.commit()
+    return {"revision": row.revision, "saved": True, "stale": False}
+
+
 @router.get("/exams/{exam_id}/export/{variant}/{format}")
 def export_exam(exam_id: str, variant: Variant, format: Format, db: DB, user: Teacher, inline: bool = False):
     row = owned(db, user, exam_id)
@@ -424,25 +512,8 @@ def export_exam(exam_id: str, variant: Variant, format: Format, db: DB, user: Te
         if not inline and (not row.reviewed or has_answer_markers(decode(content))):
             raise HTTPException(422, "请先核对学生卷正文并确认已移出参考答案")
     else:
-        document = chinese_lesson_document()
-        document.add_heading(f"{row.title} · 参考答案", 0)
-        last_kind = None
-        group_index = 0
-        for question in row_view(row, decode(content))["questions"]:
-            if question["kind"] != last_kind:
-                document.add_heading(TYPES[question["kind"]], 1)
-                last_kind = question["kind"]
-                group_index = 0
-            group_index += 1
-            first = question["text"].splitlines()
-            text = first[0] if first else "未填写题干"
-            if not PREFIX.match(text):
-                text = f"{group_index}. {text}"
-            document.add_paragraph(text)
-            document.add_paragraph(f"参考答案：{question['answer'] or '待补充'}")
-            if question["explanation"]:
-                document.add_paragraph(f"解析与评分要点：{question['explanation']}")
-        content = serialize_docx(document)
+        saved = db.get(ExamAnswerDocument, exam_id)
+        content = saved.content if saved else generated_answers(db, user, row)
     media = {"docx": DOCX_MIME, "doc": "application/msword", "pdf": "application/pdf"}[format]
     if format == "pdf":
         content = word_pdf(content)

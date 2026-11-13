@@ -246,6 +246,25 @@ class WorkflowTest(unittest.TestCase):
         return row["id"], template["id"]
 
     def check_exams(self, client, course):
+        blank = client.post("/api/exams", json={"course_id": course, "title": "默认空白卷",
+                                              "class_code": "DB101-01"}).raise_for_status().json()
+        blank_route = f"/api/exams/{blank['id']}"
+        blank_doc = Document(BytesIO(client.get(f"{blank_route}/document").raise_for_status().content))
+        self.assertIn("计算机一班", blank_doc.tables[0].cell(1, 1).text)
+        self.assertEqual(blank_doc.tables[1].cell(3, 0).text, "阅卷人")
+        self.assertEqual(blank_doc.paragraphs[-1].text, "")
+        self.assertEqual(client.post("/api/exams", json={"course_id": course, "title": "非法班级",
+                                                       "class_code": "unrelated"}).status_code, 422)
+        table_only = Document()
+        table_only.add_table(rows=1, cols=1).cell(0, 0).text = "卷头信息"
+        table_file = BytesIO()
+        table_only.save(table_file)
+        table_exam = client.post("/api/exams/import", data={"course_id": course, "title": "表格收尾"}, files={
+            "file": ("exam.docx", table_file.getvalue()),
+        }).raise_for_status().json()
+        imported_doc = Document(BytesIO(client.get(f"/api/exams/{table_exam['id']}/document").raise_for_status().content))
+        self.assertEqual(imported_doc.tables[0].cell(0, 0).text, "卷头信息")
+        self.assertEqual([p.text for p in imported_doc.paragraphs], [""])
         original = Document()
         original.add_paragraph("某课程试卷")
         original.sections[0].header.paragraphs[0].text = "保留的页眉"
@@ -290,6 +309,19 @@ class WorkflowTest(unittest.TestCase):
         self.assertFalse(any(replacement["answer"] in p.text for p in paper.paragraphs))
         answers = Document(BytesIO(client.get(f"{route}/export/answers/docx").raise_for_status().content))
         self.assertTrue(any(replacement["answer"] in p.text for p in answers.paragraphs))
+        answers.add_paragraph("教师自定义评分说明")
+        edited = BytesIO()
+        answers.save(edited)
+        answer_state = client.put(f"{route}/answers/document", data={"revision": updated["revision"]}, files={
+            "file": ("answers.docx", edited.getvalue()),
+        }).raise_for_status().json()
+        self.assertTrue(answer_state["saved"])
+        self.assertFalse(answer_state["stale"])
+        self.assertEqual(client.get(f"{route}/export/answers/docx").raise_for_status().content, edited.getvalue())
+        self.assertNotEqual(client.get(f"{route}/document").raise_for_status().content, edited.getvalue())
+        client.patch(route, json={"title": "更新后的试卷"}).raise_for_status()
+        self.assertTrue(client.get(f"{route}/answers").raise_for_status().json()["stale"])
+        self.assertEqual(client.get(f"{route}/export/answers/docx").raise_for_status().content, edited.getvalue())
         return row["id"]
 
     def check_lesson_templates(self, client, course, legacy_route):

@@ -38,6 +38,8 @@ const instruction = ref('')
 const mode = ref('replace')
 const candidate = ref(null)
 const preview = ref('')
+const editing = ref('paper')
+const answerState = ref(null)
 const sourceDraft = ref([])
 const resources = ref([])
 const page = ref(1)
@@ -126,7 +128,10 @@ async function persist() {
   body.append('file', new Blob([content], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }), 'exam.docx')
   body.append('title', exam.value.title.trim())
   body.append('revision', exam.value.revision)
-  exam.value = await api(`${path}/document`, { method: 'PUT', body })
+  if (editing.value === 'answers') {
+    answerState.value = await api(`${path}/answers/document`, { method: 'PUT', body })
+    exam.value.revision = answerState.value.revision
+  } else exam.value = await api(`${path}/document`, { method: 'PUT', body })
   dirty.value = version !== changes
   return !dirty.value
 }
@@ -253,6 +258,22 @@ function showPreview(variant) {
   })
 }
 
+function editVariant(variant, regenerate = false) {
+  run(async () => {
+    if (regenerate && !window.confirm('按当前题目重新生成参考答案？保存后将替换原有的答案文档。')) return
+    if (!regenerate && !await persist()) return
+    const answer = variant === 'answers'
+    const state = answer ? await api(`${path}/answers`) : null
+    const file = await api(`${path}${answer ? '/answers' : ''}/document?revision=${exam.value.revision}${regenerate ? '&regenerate=true' : ''}`, { binary: true })
+    bytes.value = await file.arrayBuffer()
+    editor.value = null
+    editing.value = variant
+    answerState.value = state
+    preview.value = ''
+    if (regenerate) changed()
+  })
+}
+
 function showSources() {
   run(async () => {
     const files = await api(`/resources?course_id=${exam.value.course_id}`)
@@ -284,7 +305,7 @@ function review() {
 
 function exportFile(variant, format) {
   run(async () => {
-    if (variant === 'paper' && (!exam.value.reviewed || dirty.value)) {
+    if (variant === 'paper' && (!exam.value.reviewed || (editing.value === 'paper' && dirty.value))) {
       formError.value = ''
       modal.value = 'review'
       return
@@ -302,7 +323,7 @@ function exportFile(variant, format) {
     <template v-if="exam">
       <header class="page-heading">
         <div class="editor-title">
-          <input v-model="exam.title" aria-label="试卷名称" maxlength="160" :disabled="busy || !!preview" @input="changed">
+          <input v-model="exam.title" aria-label="试卷名称" maxlength="160" :disabled="busy || !!preview || editing !== 'paper'" @input="changed">
           <p role="status">v{{ exam.revision }} · {{ dirty ? '有未保存的修改' : '已保存' }} · 已标记 {{ exam.questions.length }} 题 / {{ exam.total_points }} 分</p>
         </div>
         <div class="actions">
@@ -316,13 +337,21 @@ function exportFile(variant, format) {
           <button class="button primary" :disabled="!ready || !dirty" @click="run(persist)"><Save :size="17" /> 保存</button>
         </div>
       </header>
-      <div v-if="!exam.reviewed || dirty" class="exam-review">
+      <div class="segmented exam-edit-tabs" aria-label="编辑文档">
+        <button :aria-pressed="editing === 'paper'" :disabled="busy" @click="editing !== 'paper' && editVariant('paper')">编辑试卷</button>
+        <button :aria-pressed="editing === 'answers'" :disabled="busy" @click="editing !== 'answers' && editVariant('answers')">编辑参考答案</button>
+      </div>
+      <div v-if="editing === 'answers' && answerState?.stale" class="exam-review">
+        <span>这份答案保存后试卷版本已有更新，请核对题目与答案。</span>
+        <button class="button secondary" :disabled="busy" @click="editVariant('answers', true)">按当前题目重新生成</button>
+      </div>
+      <div v-if="editing === 'paper' && (!exam.reviewed || dirty)" class="exam-review">
         <span>{{ exam.answer_markers ? '正文检测到答案或评分说明，请移出后再确认。' : '下载学生卷前，请检查正文是否含参考答案。' }}</span>
         <button class="button secondary" :disabled="busy" @click="formError = ''; modal = 'review'">确认学生卷</button>
       </div>
       <PdfViewer v-if="preview" :key="preview" :src="`/api${path}/export/${preview}/pdf?inline=true&v=${exam.revision}`" v-model:page="page" />
-      <div v-show="!preview" class="exam-workspace">
-        <aside class="panel exam-index" aria-label="题目列表">
+      <div v-show="!preview" :class="{ 'exam-workspace': editing === 'paper' }">
+        <aside v-if="editing === 'paper'" class="panel exam-index" aria-label="题目列表">
           <header class="stack">
             <h2>题目</h2>
             <button class="button secondary" :disabled="!ready || !selectionText.trim()" @mousedown.prevent @click="markSelection"><BookmarkPlus :size="17" /> 将选区标为一题</button>
@@ -343,9 +372,9 @@ function exportFile(variant, format) {
             <button class="button subtle" :disabled="!ready" @click="removeMarker">移除题目标记</button>
           </div>
         </aside>
-        <section class="word-editor" aria-label="Word 试卷编辑器" @keydown.capture="editorShortcut">
+        <section class="word-editor" :aria-label="editing === 'paper' ? 'Word 试卷编辑器' : 'Word 参考答案编辑器'" @keydown.capture="editing === 'paper' && editorShortcut($event)">
           <LocaleProvider :i18n="zhCN">
-            <DocxEditorRoot :document="bytes" locale="zh-CN" :color-mode="theme" :fonts="fonts" @ready="editorReady" @change="documentChanged">
+            <DocxEditorRoot :key="editing" :document="bytes" locale="zh-CN" :color-mode="theme" :fonts="fonts" @ready="editorReady" @change="documentChanged">
               <div class="word-toolbar"><DocxEditorToolbar>
                 <DocxEditorToolbar.Group id="insert" label="插入" after="text" :priority="75">
                   <DocxEditorToolbar.ImageInsert /><DocxEditorToolbar.TableInsert />

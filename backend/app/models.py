@@ -166,6 +166,14 @@ class ExamDocument(Base):
     content: Mapped[bytes] = mapped_column(LargeBinary)
 
 
+class ExamAnswerDocument(Base):
+    __tablename__ = "exam_answer_documents"
+
+    exam_id: Mapped[str] = mapped_column(ForeignKey("exams.id", ondelete="CASCADE"), primary_key=True)
+    content: Mapped[bytes] = mapped_column(LargeBinary)
+    based_on_revision: Mapped[int] = mapped_column(Integer)
+
+
 class ExamTemplate(Base):
     __tablename__ = "exam_templates"
 

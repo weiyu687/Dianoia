@@ -13,6 +13,7 @@ const router = useRouter()
 const items = ref([])
 const templates = ref([])
 const resources = ref([])
+const classes = ref([])
 const search = ref('')
 const dialog = ref(null)
 const error = ref('')
@@ -25,11 +26,13 @@ const labels = { blank: '新建试卷', import: '导入 Word 原卷', ai: 'AI �
 
 onMounted(async () => {
   try {
-    const [rows, designs, files] = await Promise.all([
+    const [rows, designs, files, groups] = await Promise.all([
       api(`/exams?course_id=${courseId.value}`), api('/exam-templates'), api(`/resources?course_id=${courseId.value}`),
+      api(`/exams/course-fields?course_id=${courseId.value}`),
     ])
     items.value = rows
     templates.value = designs
+    classes.value = groups
     resources.value = files.filter((file) => file.status === 'ready' && file.page_count
       && (!['doc', 'docx'].includes(file.extension) || file.has_preview))
   } catch (failure) { error.value = failure.message }
@@ -38,7 +41,7 @@ onMounted(async () => {
 
 function open(mode, item = null) {
   formError.value = ''
-  dialog.value = { mode, item, title: item?.title || '', file: null, template_id: '', sources: [], instruction: '',
+  dialog.value = { mode, item, title: item?.title || '', file: null, template_id: '', class_code: classes.value.length === 1 ? classes.value[0].code : '', sources: [], instruction: '',
     difficulty: '适中', groups: [{ kind: 'single', count: 5, points: 2 }] }
 }
 
@@ -58,7 +61,7 @@ async function submit() {
   busy.value = true
   formError.value = ''
   try {
-    const { mode, item, title, file, template_id, sources, instruction, difficulty, groups } = dialog.value
+    const { mode, item, title, file, template_id, class_code, sources, instruction, difficulty, groups } = dialog.value
     if (mode === 'rename') {
       const row = await api(`/exams/${item.id}`, { method: 'PATCH', body: { title } })
       items.value = [row, ...items.value.filter((entry) => entry.id !== row.id)]
@@ -66,7 +69,7 @@ async function submit() {
       await api(`/exams/${item.id}`, { method: 'DELETE' })
       items.value = items.value.filter((entry) => entry.id !== item.id)
     } else {
-      let body = { course_id: courseId.value, title, template_id: template_id || null, sources }
+      let body = { course_id: courseId.value, title, template_id: template_id || null, class_code, sources }
       const endpoint = { import: '/exams/import', ai: '/exams/generate', blank: '/exams' }[mode]
       if (mode === 'import') {
         body = new FormData()
@@ -130,6 +133,9 @@ async function copy(item) {
           <label v-if="['blank', 'ai'].includes(dialog.mode)">Word 模板<select v-model="dialog.template_id">
             <option value="">默认版式</option>
             <option v-for="template in templates" :key="template.id" :value="template.id">{{ template.title }}</option>
+          </select></label>
+          <label v-if="['blank', 'ai'].includes(dialog.mode) && !dialog.template_id && classes.length">考试班级<select v-model="dialog.class_code">
+            <option value="">留空，由教师填写</option><option v-for="group in classes" :key="group.code" :value="group.code">{{ group.name }}</option>
           </select></label>
           <template v-if="dialog.mode === 'ai'">
             <div class="section-heading"><strong>组卷明细 · {{ total }} 分</strong><button type="button" class="button secondary" :disabled="dialog.groups.length >= 5" @click="addGroup"><Plus :size="15" /> 添加题型</button></div>
