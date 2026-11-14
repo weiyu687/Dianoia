@@ -189,16 +189,18 @@ class WorkflowTest(unittest.TestCase):
 
     def check_presentations(self, client, course, resource_id):
         from app.presentation_document import Deck
-        from app.presentation_templates import PRESETS, builtin
+        from app.presentation_templates import builtin, template_keys
 
         decks, templates = "/api/presentations", "/api/presentation-templates"
-        for key in PRESETS:
+        for key in template_keys():
             Deck.model_validate(builtin(key)["document"])
-        self.assertEqual(len(client.get(templates).raise_for_status().json()), 10)
+        self.assertEqual(len(client.get(templates).raise_for_status().json()), len(template_keys()))
         source = {"resource_id": resource_id, "start": 2, "end": 2}
         outline = [{"title": title} for title in ("隔离级别", "概念", "实验")]
         pages = [{"layout": "body", "points": ["阅读实验记录"], "notes": "比较事务隔离效果",
                   "citations": [source], **entry} for entry in outline]
+        pages[1].update(layout="table", table=[["隔离级别", "特点"], ["Repeatable read", "同一事务内可重复读取"]])
+        pages[2].update(layout="code", code="def run():\n    return 42")
         data = {"course_id": course, "title": "事务实训", "template_id": "practice", "sources": [source], "page_count": 3}
         with patch("app.presentations.generate", side_effect=[json.dumps({"pages": outline}), json.dumps({"pages": pages})]) as model:
             data["outline"] = client.post(f"{decks}/outline", json=data).raise_for_status().json()
@@ -219,6 +221,10 @@ class WorkflowTest(unittest.TestCase):
         self.assertEqual(candidate["text"], "补充一个实验步骤")
         self.assertEqual(client.get(detail).json()["revision"], 1)
         title["text"] = candidate["text"]
+        matrix = r"\begin{bmatrix}1&2\\3&4\end{bmatrix}+\frac{1}{x}"
+        self.assertEqual(client.post(f"{detail}/formula", json={"latex": matrix}).status_code, 200)
+        self.assertEqual(client.post(f"{detail}/formula", json={"latex": r"\unknown{a}"}).status_code, 422)
+        deck["document"]["slides"][2]["elements"].append({"kind": "formula", "latex": matrix})
         saved = client.put(detail, json=deck).raise_for_status().json()
         self.assertEqual(saved["revision"], 2)
         self.assertEqual(client.put(detail, json=deck).status_code, 409)
@@ -234,6 +240,10 @@ class WorkflowTest(unittest.TestCase):
         self.assertEqual(len(pptx.slides), 3)
         self.assertEqual(pptx.slides[0].shapes[1].text, candidate["text"])
         self.assertEqual(pptx.slides[0].notes_slide.notes_text_frame.text, first["notes"])
+        table = next(shape.table for shape in pptx.slides[1].shapes if shape.has_table)
+        self.assertEqual(table.cell(1, 0).text, "Repeatable read")
+        self.assertTrue(any(shape.has_text_frame and "    return 42" in shape.text for shape in pptx.slides[2].shapes))
+        self.assertIn("a14:m", pptx.slides[2].shapes[-1]._element.xml)
         return deck["id"], template["id"]
 
     def check_mind_maps(self, client, course, resource_id):

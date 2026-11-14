@@ -4,6 +4,7 @@ from io import BytesIO
 from typing import Annotated, Literal
 
 from PIL import Image, UnidentifiedImageError
+from lxml import etree
 from pydantic import BaseModel, Field, StringConstraints, model_validator
 from pptx import Presentation
 from pptx.chart.data import CategoryChartData
@@ -16,18 +17,21 @@ from pptx.oxml.xmlchemy import OxmlElement
 from pptx.util import Pt
 
 from .lessons import Source
+from .exam_math import MATH_NS, MC_NS, SOURCE, equation_xml
 from .models import identifier
 from .presentation_templates import HEIGHT, WIDTH
 
+DRAWING_2010_NS = "http://schemas.microsoft.com/office/drawing/2010/main"
+
 Color = Annotated[str, StringConstraints(pattern=r"^#[0-9a-fA-F]{6}$")]
 Key = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{1,64}$")]
-Layout = Literal["blank", "cover", "body", "bullets", "two", "steps", "code", "table", "data"]
+Layout = Literal["blank", "cover", "body", "bullets", "two", "steps", "code", "table", "data", "cards", "agenda", "closing"]
 TitleCell = Annotated[str, StringConstraints(max_length=160)]
 
 
 class Element(BaseModel):
     id: Key = Field(default_factory=identifier)
-    kind: Literal["text", "shape", "image", "table", "chart"]
+    kind: Literal["text", "shape", "image", "table", "chart", "formula"]
     x: float = Field(default=80, ge=-WIDTH, le=WIDTH * 2)
     y: float = Field(default=80, ge=-HEIGHT, le=HEIGHT * 2)
     width: float = Field(default=280, ge=8, le=WIDTH * 2)
@@ -38,7 +42,10 @@ class Element(BaseModel):
     fill: Color = "#436790"
     color: Color = "#172b42"
     stroke: Color | None = None
+    header_fill: Color = "#e4ebf4"
+    header_color: Color | None = None
     text: str = Field(default="", max_length=4000)
+    latex: str = Field(default="", max_length=1600)
     font: Literal["Microsoft YaHei", "SimSun", "SimHei", "Arial", "Consolas"] = "Microsoft YaHei"
     size: float = Field(default=24, ge=8, le=144)
     bold: bool = False
@@ -55,6 +62,11 @@ class Element(BaseModel):
 
     @model_validator(mode="after")
     def check_content(self):
+        if self.kind == "formula":
+            try:
+                equation_xml(self.latex)
+            except ValueError as error:
+                raise ValueError("公式无法转换，请检查 LaTeX 表达式") from error
         if self.kind == "image":
             try:
                 prefix, data = self.image.split(",", 1) if self.image else ("", "")
@@ -77,6 +89,7 @@ class Slide(BaseModel):
     id: Key = Field(default_factory=identifier)
     background: Color = "#ffffff"
     layout: Layout = "blank"
+    theme: Key | None = None
     elements: list[Element] = Field(default_factory=list, max_length=100)
     notes: str = Field(default="", max_length=8000)
     citations: list[Source] = Field(default_factory=list, max_length=12)
@@ -139,7 +152,28 @@ def format_text(frame, item, value=None):
         props.append(east_asia)
 
 
-def deck_pptx(title, deck):
+def format_equation(frame, item):
+    frame.margin_left = frame.margin_right = frame.margin_top = frame.margin_bottom = Pt(0)
+    paragraph = frame.paragraphs[0]
+    paragraph.alignment = {"left": PP_ALIGN.LEFT, "center": PP_ALIGN.CENTER, "right": PP_ALIGN.RIGHT}[item.align]
+    paragraph.font.size = px(item.size)
+    paragraph.font.color.rgb = rgb(item.color)
+    equation = etree.fromstring(equation_xml(item.latex).encode())
+    equation.attrib.pop(SOURCE, None)
+    equation.attrib.pop(f"{{{MC_NS}}}Ignorable", None)
+    for run in equation.iter(f"{{{MATH_NS}}}r"):
+        run_style = OxmlElement("a:rPr")
+        run_style.set("sz", str(round(item.size * 75)))
+        fill = etree.SubElement(run_style, qn("a:solidFill"))
+        etree.SubElement(fill, qn("a:srgbClr"), val=item.color[1:].upper())
+        etree.SubElement(run_style, qn("a:latin"), typeface="Cambria Math")
+        run.insert(1 if len(run) and run[0].tag == f"{{{MATH_NS}}}rPr" else 0, run_style)
+    node = etree.SubElement(paragraph._p, f"{{{DRAWING_2010_NS}}}m", nsmap={"a14": DRAWING_2010_NS})
+    etree.cleanup_namespaces(equation)
+    node.append(equation)
+
+
+def deck_pptx(title, deck, *, for_pdf=False):
     document = Presentation()
     document.core_properties.title = title
     document.slide_width, document.slide_height = px(WIDTH), px(HEIGHT)
@@ -149,9 +183,17 @@ def deck_pptx(title, deck):
         slide.background.fill.fore_color.rgb = rgb(source.background)
         for item in source.elements:
             position = [px(value) for value in (item.x, item.y, item.width, item.height)]
-            if item.kind == "text":
+            if item.kind in {"text", "formula"}:
                 shape = slide.shapes.add_textbox(*position)
-                format_text(shape.text_frame, item)
+                if item.kind == "formula":
+                    format_equation(shape.text_frame, item)
+                    # Impress renders imported Office Math in black, including on dark slides.
+                    background = rgb(source.background)
+                    if for_pdf and sum(channel * weight for channel, weight in zip(background, (0.2126, 0.7152, 0.0722))) < 145:
+                        shape.fill.solid()
+                        shape.fill.fore_color.rgb = rgb("#f5f7fb")
+                else:
+                    format_text(shape.text_frame, item)
             elif item.kind == "image":
                 shape = slide.shapes.add_picture(BytesIO(b64decode(item.image.split(",", 1)[1])), *position)
             elif item.kind == "table":
@@ -160,8 +202,11 @@ def deck_pptx(title, deck):
                     for j, value in enumerate(row):
                         cell = shape.table.cell(i, j)
                         cell.fill.solid()
-                        cell.fill.fore_color.rgb = rgb("#e4ebf4" if i == 0 else "#f5f7fa")
-                        format_text(cell.text_frame, item.model_copy(update={"size": min(item.size, 20), "bold": i == 0}), value)
+                        cell.fill.fore_color.rgb = rgb(item.header_fill if i == 0 else item.fill if item.header_color else "#f5f7fa")
+                        format_text(cell.text_frame, item.model_copy(update={
+                            "size": min(item.size, 20), "bold": i == 0,
+                            "color": item.header_color if i == 0 and item.header_color else item.color,
+                        }), value)
                         cell.margin_left, cell.margin_top = Pt(5), Pt(4)
             elif item.kind == "chart":
                 data = CategoryChartData()

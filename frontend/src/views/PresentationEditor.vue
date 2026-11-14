@@ -1,7 +1,7 @@
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, shallowRef } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, ArrowDown, ArrowUp, BarChart3, Copy, Download, FileImage, Play, Plus, Redo2, Save, Shapes, Sparkles, Table2, Trash2, Type, Undo2, X } from 'lucide-vue-next'
+import { ArrowLeft, ArrowDown, ArrowUp, BarChart3, Copy, Download, FileImage, Play, Plus, Redo2, Save, Shapes, Sigma, Sparkles, Table2, Trash2, Type, Undo2, X } from 'lucide-vue-next'
 import { api, download } from '../api'
 import Modal from '../components/Modal.vue'
 import MapSources from '../components/MapSources.vue'
@@ -14,6 +14,7 @@ import '../presentations.css'
 
 const route = useRoute()
 const router = useRouter()
+const FormulaEditor = defineAsyncComponent(() => import('../components/FormulaEditor.vue'))
 const endpoint = '/presentations/' + route.params.id
 const row = ref(null)
 const history = shallowRef([])
@@ -32,6 +33,7 @@ const pdf = ref(false)
 const pdfPage = ref(1)
 const play = ref(false)
 const playIndex = ref(0)
+const playSurface = ref(null)
 const busy = ref(false)
 const loading = ref(true)
 const error = ref('')
@@ -190,24 +192,30 @@ function organize(unset = false) {
     for (const object of page.value.elements) if (selected.value.includes(object.id) && !object.locked) object.group = group
   })
 }
-function alignSelection(mode) {
+function alignSelection(mode, canvas = false) {
   const objects = page.value.elements.filter((object) => selected.value.includes(object.id) && !object.locked)
-  if (objects.length < 2) return
-  const left = Math.min(...objects.map((object) => object.x))
-  const right = Math.max(...objects.map((object) => object.x + object.width))
-  const top = Math.min(...objects.map((object) => object.y))
-  const bottom = Math.max(...objects.map((object) => object.y + object.height))
-  if (mode === 'distribute') {
-    const ordered = [...objects].sort((a, b) => a.x - b.x)
-    const gap = (right - left - ordered.reduce((sum, object) => sum + object.width, 0)) / (ordered.length - 1)
-    let x = left
+  if (objects.length < (canvas ? 1 : 2)) return
+  const left = canvas ? 0 : Math.min(...objects.map((object) => object.x))
+  const right = canvas ? width : Math.max(...objects.map((object) => object.x + object.width))
+  const top = canvas ? 0 : Math.min(...objects.map((object) => object.y))
+  const bottom = canvas ? height : Math.max(...objects.map((object) => object.y + object.height))
+  if (mode === 'distribute' || mode === 'distributeVertical') {
+    const horizontal = mode === 'distribute'
+    const coordinate = horizontal ? 'x' : 'y'
+    const dimension = horizontal ? 'width' : 'height'
+    const start = horizontal ? left : top
+    const end = horizontal ? right : bottom
+    const ordered = [...objects].sort((a, b) => a[coordinate] - b[coordinate])
+    const gap = (end - start - ordered.reduce((sum, object) => sum + object[dimension], 0)) / (ordered.length - 1)
+    let cursor = start
     setPositions(ordered.map((object) => {
-      const position = { id: object.id, x }
-      x += object.width + gap
+      const position = { id: object.id, [coordinate]: cursor }
+      cursor += object[dimension] + gap
       return position
     }))
   } else setPositions(objects.map((object) => ({ id: object.id, ...{
     left: { x: left }, top: { y: top }, center: { x: (left + right - object.width) / 2 },
+    right: { x: right - object.width }, bottom: { y: bottom - object.height },
     middle: { y: (top + bottom - object.height) / 2 },
   }[mode] })))
 }
@@ -256,10 +264,30 @@ function editContent(id) {
   const target = page.value.elements.find((object) => object.id === id)
   if (!target || target.locked) return
   if (target.kind === 'image') { openImage(id); return }
+  if (target.kind === 'formula') { openFormula(target); return }
   if (target.kind === 'shape') return
   formError.value = ''
   modal.value = { type: 'element', item: clone(target) }
   nextTick(() => window.document.querySelector('.presentation-text-input')?.focus())
+}
+function openFormula(target = null) {
+  formError.value = ''
+  modal.value = { type: 'formula', item: target }
+}
+async function applyFormula(latex) {
+  const target = modal.value.item
+  formError.value = ''
+  busy.value = true
+  try {
+    await api(endpoint + '/formula', { method: 'POST', body: { latex } })
+  } catch (failure) {
+    formError.value = failure.message
+    return
+  } finally { busy.value = false }
+  if (target) change(() => { target.latex = latex })
+  else addObject('formula', { latex, x: 76, y: page.value.layout === 'cover' ? 375 : 205,
+    width: 620, height: 138, size: 29, color: readableInk(page.value.background) })
+  modal.value = null
 }
 function resizeTable(axis, delta) {
   const rows = modal.value.item.rows
@@ -372,7 +400,11 @@ async function saveDialog() {
   }
   modal.value = null
 }
-function startPlay() { playIndex.value = pageNumber.value - 1; play.value = true }
+function startPlay() {
+  playIndex.value = pageNumber.value - 1
+  play.value = true
+  nextTick(() => playSurface.value?.focus())
+}
 function step(delta) { playIndex.value = Math.max(0, Math.min(document.value.slides.length - 1, playIndex.value + delta)) }
 function shortcuts(event) {
   if (!page.value || event.isComposing) return
@@ -446,6 +478,7 @@ function shortcuts(event) {
             <button class="button subtle" @click="openImage(null)"><FileImage :size="16" /> 图片</button>
             <button class="button subtle" @click="addObject('table')"><Table2 :size="16" /> 表格</button>
             <button class="button subtle" @click="addObject('chart', { color: readableInk(page.background) })"><BarChart3 :size="16" /> 图表</button>
+            <button class="button subtle" @click="openFormula()"><Sigma :size="16" /> 公式</button>
           </div>
           <div class="presentation-toolgroup"><button class="button subtle" @click="openDialog('AI')"><Sparkles :size="17" /> AI 局部生成</button></div>
         </div>
@@ -487,8 +520,10 @@ function shortcuts(event) {
       </div>
       <input ref="fileInput" type="file" accept="image/png,image/jpeg" hidden @change="loadImage">
       <Teleport to="body">
-        <div v-if="play" class="presentation-player" role="dialog" aria-label="放映">
-          <SlideCanvas :slide="document.slides[playIndex]" />
+        <div v-if="play" class="presentation-player" role="dialog" aria-modal="true" aria-label="放映">
+          <button ref="playSurface" type="button" class="presentation-play-surface" aria-label="点击画面翻到下一页" @click="step(1)">
+            <SlideCanvas :slide="document.slides[playIndex]" />
+          </button>
           <div class="presentation-play-controls"><button class="button secondary" :disabled="!playIndex" @click="step(-1)">上一页</button>
             <span>{{ playIndex + 1 }} / {{ document.slides.length }}</span>
             <button class="button secondary" :disabled="playIndex === document.slides.length-1" @click="step(1)">下一页</button>
@@ -496,9 +531,13 @@ function shortcuts(event) {
         </div>
       </Teleport>
     </template>
-    <Modal :open="!!modal" :title="{ element:'编辑内容', sources:'课件参考资料', cite:'本页引用', template:'存为模板', AI:'AI 局部生成' }[modal?.type]"
+    <Modal :open="!!modal" :title="{ element:'编辑内容', sources:'课件参考资料', cite:'本页引用', template:'存为模板', AI:'AI 局部生成', formula:'课件公式' }[modal?.type]"
       wide @close="!busy && (modal = null)">
-      <form v-if="modal" class="stack" @submit.prevent="modal.type === 'AI' ? suggest() : saveDialog()">
+      <template v-if="modal?.type === 'formula'">
+        <FormulaEditor :initial="modal.item?.latex || ''" :replace="!!modal.item" :busy="busy" @apply="applyFormula" />
+        <p v-if="formError" class="error" role="alert">{{ formError }}</p>
+      </template>
+      <form v-else-if="modal" class="stack" @submit.prevent="modal.type === 'AI' ? suggest() : saveDialog()">
         <template v-if="modal.type === 'element'">
           <label v-if="modal.item.kind === 'text'">文本框内容<textarea v-model="modal.item.text" rows="7" maxlength="4000" class="presentation-text-input" /></label>
           <template v-else-if="modal.item.kind === 'table'">

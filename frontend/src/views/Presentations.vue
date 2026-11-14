@@ -132,7 +132,10 @@ function manage(mode, item, template = false) {
       <div v-else class="presentation-template-grid">
         <article v-for="item in visible" :key="item.id" class="panel presentation-template-card">
           <button type="button" class="presentation-template-select" :aria-label="'使用模板 ' + item.title" @click="open('new', item)">
-            <SlideThumbnail :slide="item.thumbnail" />
+            <span class="presentation-template-preview">
+              <SlideThumbnail :slide="item.thumbnail" />
+              <span v-if="item.sample" class="presentation-template-sample"><SlideThumbnail :slide="item.sample" /></span>
+            </span>
             <span class="presentation-template-caption"><strong>{{ item.title }}</strong><small>{{ item.pages }} 页</small></span>
             <span v-if="item.headings?.length" class="presentation-template-headings">{{ item.headings.join(' · ') }}</span>
           </button>
@@ -151,7 +154,7 @@ function manage(mode, item, template = false) {
         <template v-else>
           <label>{{ modal.mode === 'rename' ? '模板名称' : '课件名称' }}<input v-model.trim="modal.title" maxlength="160" required></label>
           <label v-if="modal.mode !== 'rename'">模板<select v-model="modal.template_id">
-            <option value="">空白 / 自动版式</option><option v-for="item in templates" :key="item.id" :value="item.id">{{ item.title }}</option>
+            <option value="">{{ modal.mode === 'AI' ? '自动选择版式' : '空白' }}</option><option v-for="item in templates" :key="item.id" :value="item.id">{{ item.title }}</option>
           </select></label>
           <template v-if="modal.mode === 'AI'">
             <template v-if="!modal.outline.length">

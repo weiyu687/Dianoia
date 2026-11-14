@@ -86,8 +86,8 @@ function dragEnd(event) { emit('moveEnd', props.item.id, event) }
     </template>
     <template v-else-if="item.kind === 'table'">
       <template v-for="(cell, i) in cells" :key="i">
-        <VRect :config="{ ...cell, fill: cell.header ? '#e4ebf4' : '#f5f7fa', stroke: '#b7c5d6', strokeWidth: 1 }" />
-        <VText :config="{ ...cell, fontSize: Math.min(item.size || 18,20), fontFamily: item.font, fill: item.color, fontStyle: cell.header ? 'bold':'normal', padding: 8, wrap:'char' }" />
+        <VRect :config="{ ...cell, fill: cell.header ? item.header_fill || '#e4ebf4' : item.header_color ? item.fill : '#f5f7fa', stroke: '#b7c5d6', strokeWidth: 1 }" />
+        <VText :config="{ ...cell, fontSize: Math.min(item.size || 18,20), fontFamily: item.font, fill: cell.header ? item.header_color || item.color : item.color, fontStyle: cell.header ? 'bold':'normal', padding: 6, wrap:'char' }" />
       </template>
     </template>
     <template v-else-if="item.kind === 'chart'">

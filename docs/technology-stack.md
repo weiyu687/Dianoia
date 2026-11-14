@@ -63,6 +63,10 @@
 
 Pillow `>=12.2,<14` 用于服务器端验证 PNG、JPEG 的文件格式与解码上限，本机验证版本为 13.0.0。前端构建将画布依赖放入按需加载的课件模块。运行 PDF 导出需要可执行的 LibreOffice Impress 和与课件匹配的中文字体，支持通过 `DIANOIA_SOFFICE` 指定路径。Chrome 验证模板创建、拖拽、编辑、放映和下载，PPTX 已复读验证原生文字、表格、图表和备注，PDF 已验证五页输出。整稿、局部备注、Agent 草稿及候选使用真实模型验证，资料范围传入通过固定测试材料回归。
 
+2026-11-14 课件质量迭代沿用当前模型和 PPTX 输出链路。内置主题负责配色、封面与正文风格，模型根据内容字段选择逐页版式，渲染器负责表格、代码、步骤卡片以及字号和版面边界。参考 PPTAgent 的分阶段生成和 PresentBench 对内容与视觉布局的独立评价。外部模板候选为 SlidesCarnival CC BY 4.0，模板需要保留署名，随附照片按单独条款处理；本次使用原创主题。[Kimi Slides 创建模式](https://www.kimi.ai/help/slides/ppt-creation-mode) · [Gamma 主题与视觉素材](https://help.gamma.app/en/articles/11856101-how-do-i-use-the-visuals-menu-in-gamma) · [PPTAgent](https://aclanthology.org/2025.emnlp-main.728/) · [PresentBench](https://presentbench.github.io/) · [SlidesCarnival 条款](https://www.slidescarnival.com/terms-of-use/)
+
+课件公式复用试卷的 MathLive 0.111.4、KaTeX 0.16.47、latex2mathml 3.81.1 和 LaTeX 校验。浏览器采用公式字形排版，PPTX 写入 DrawingML 中的 Office Math。已用最小样例确认 LibreOffice Impress 可将分式和矩阵输出到 PDF。备选 MathJax SVG 可固定显示，但需要另行验证 PowerPoint 原生编辑体验。[Microsoft DrawingML 公式规范](https://learn.microsoft.com/en-us/openspecs/office_standards/ms-odrawxml/cdafda97-9124-48ed-8d64-7f1dd9197c8a) · [MathJax SVG](https://docs.mathjax.org/en/latest/output/index.html)
+
 ## 待验证和待选型
 
 - 资料向量检索的候选为 PostgreSQL + pgvector 与 Qwen3-Embedding。以真实中文课程样本比较证据召回、章节切分与引用页码后再确认。

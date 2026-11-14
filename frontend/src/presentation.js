@@ -1,6 +1,6 @@
 export const width = 960
 export const height = 540
-export const labels = { text: '文本框', shape: '形状', image: '图片', table: '表格', chart: '图表' }
+export const labels = { text: '文本框', shape: '形状', image: '图片', table: '表格', chart: '图表', formula: '公式' }
 export const layouts = { blank: '空白', cover: '封面', body: '标题与正文', two: '双栏', steps: '步骤', table: '表格' }
 export const shapes = { rect: '矩形', round: '圆角矩形', ellipse: '椭圆', triangle: '三角形', arrow: '箭头', line: '线条' }
 export const chartTypes = { column: '柱状图', line: '折线图', pie: '饼图' }

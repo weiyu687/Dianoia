@@ -25,6 +25,9 @@ function updateNumber(key, lower, upper, event) {
           <button class="button secondary" @click="emit('align','center')">水平居中</button>
           <button class="button secondary" @click="emit('align','middle')">垂直居中</button>
           <button class="button secondary" :disabled="selected.length < 3" @click="emit('align','distribute')">横向分布</button>
+          <button class="button secondary" :disabled="selected.length < 3" @click="emit('align','distributeVertical')">纵向分布</button>
+          <button class="button secondary" @click="emit('align','right')">右对齐</button>
+          <button class="button secondary" @click="emit('align','bottom')">底端对齐</button>
           <button class="button secondary" @click="emit('group')">组合</button>
           <button class="button secondary" @click="emit('ungroup')">取消组合</button>
           <button class="button secondary" @click="emit('delete')">删除</button>
@@ -70,7 +73,15 @@ function updateNumber(key, lower, upper, event) {
             <label v-if="item.chart !== 'pie'" class="presentation-color">图表颜色<input type="color" :value="item.fill" @change="emit('change',{fill:$event.target.value})"></label>
             <label class="presentation-color">标签颜色<input type="color" :value="item.color" @change="emit('change',{color:$event.target.value})"></label>
           </template>
-          <button v-if="['text','table','chart','image'].includes(item.kind)" class="button secondary" @click="emit('edit',item.id)">{{ item.kind === 'image' ? '替换图片' : '编辑内容' }}</button>
+          <template v-if="item.kind === 'formula'">
+            <label>公式字号<input type="number" min="8" max="144" :value="item.size" @change="updateNumber('size',8,144,$event)"></label>
+            <label class="presentation-color">公式颜色<input type="color" :value="item.color" @change="emit('change',{color:$event.target.value})"></label>
+          </template>
+          <button v-if="['text','table','chart','image','formula'].includes(item.kind)" class="button secondary" @click="emit('edit',item.id)">{{ item.kind === 'image' ? '替换图片' : item.kind === 'formula' ? '编辑公式' : '编辑内容' }}</button>
+          <label>对齐画布<select value="" @change="emit('align',$event.target.value,true); $event.target.value = ''">
+            <option value="" disabled>选择对齐位置</option><option value="left">左侧</option><option value="center">水平居中</option><option value="right">右侧</option>
+            <option value="top">顶部</option><option value="middle">垂直居中</option><option value="bottom">底部</option>
+          </select></label>
           <div class="presentation-control-row">
             <button class="button subtle" @click="emit('layer','front')">置顶</button><button class="button subtle" @click="emit('layer','back')">置底</button>
             <button class="button subtle" @click="emit('layer','up')">上移一层</button><button class="button subtle" @click="emit('layer','down')">下移一层</button>
