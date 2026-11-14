@@ -184,6 +184,39 @@ class ExamAnswerSheet(Base):
     edited: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class TeachingPresentation(Base):
+    __tablename__ = "teaching_presentations"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=identifier)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id"), index=True)
+    title: Mapped[str] = mapped_column(String(160))
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    document: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
+
+
+class TeachingPresentationTemplate(Base):
+    __tablename__ = "teaching_presentation_templates"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=identifier)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    title: Mapped[str] = mapped_column(String(160))
+    document: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
+class PresentationSuggestion(Base):
+    __tablename__ = "presentation_suggestions"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=identifier)
+    presentation_id: Mapped[str] = mapped_column(ForeignKey("teaching_presentations.id", ondelete="CASCADE"), index=True)
+    request: Mapped[dict] = mapped_column(JSON)
+    result: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now, index=True)
+
+
 class ExamTemplate(Base):
     __tablename__ = "exam_templates"
 

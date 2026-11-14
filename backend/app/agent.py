@@ -14,6 +14,7 @@ from .exams import ExamGenerate, SheetBuild, build_sheet, generate_exam, get_exa
 from .lessons import get_lesson, list_lessons
 from .mind_maps import MapGeneration, generate_map, get_map, list_maps
 from .models import User
+from .presentations import GenerateDeck, SlideChange, generate_presentation, get_presentation, list_presentations, list_templates as list_slide_templates, store_suggestion
 from .resources import get_page, get_resource, list_resources
 
 router = APIRouter(prefix="/api/agent", tags=["teacher agent"])
@@ -46,6 +47,8 @@ def chat(data: Chat, db: DB, user: Teacher):
     course_id = data.course_id
     created_maps = {}
     created_exams = {}
+    created_presentations = {}
+    presentation_suggestions = {}
     creation_lock = Lock()
 
     def run_tool(operation, *args):
@@ -143,6 +146,81 @@ def chat(data: Chat, db: DB, user: Teacher):
         """列出当前课程中教师自己的试卷名称、ID 与版本。"""
         return run_tool(lambda session, teacher: list_exams(course_id, session, teacher)[:50])
 
+    def find_presentations() -> list:
+        """列出当前课程的演示文稿 ID、名称和版本。"""
+        return run_tool(lambda session, teacher: list_presentations(course_id, session, teacher)[:50])
+
+    def find_presentation_templates() -> list:
+        """列出可用于制作演示文稿的教学模板名称与 ID。"""
+        return run_tool(lambda session, teacher: [
+            {key: template[key] for key in ("id", "title", "builtin")} for template in list_slide_templates(session, teacher)[:50]
+        ])
+
+    def presentation_contents(presentation_id: str, page: int | None = None) -> dict:
+        """读取课件大纲或指定页的文字、备注及课件资料。页码从 1 开始。"""
+        def read(session, teacher):
+            row = get_presentation(presentation_id, session, teacher)
+            if row["course_id"] != course_id:
+                return {"error": "当前课程没有该课件"}
+            document = row["document"]
+            slides = document["slides"]
+            if page is not None and not 1 <= page <= len(slides):
+                return {"error": "页码超过课件范围"}
+            if page is None:
+                content = [{"id": slide["id"], "page": index, "title": next((
+                    element["text"] for element in slide["elements"] if element["kind"] == "text"
+                ), "")[:160]} for index, slide in enumerate(slides, 1)]
+            else:
+                slide = slides[page - 1]
+                content = [{"id": slide["id"], "page": page, "notes": slide["notes"][:2000], "citations": slide["citations"],
+                            "text": [{"id": item["id"], "text": item["text"][:800]}
+                                     for item in slide["elements"] if item["kind"] == "text"][:16]}]
+            return {"title": row["title"], "revision": row["revision"], "slides": content, "sources": document["sources"]}
+        return run_tool(read)
+
+    def create_presentation_draft(title: str, instruction: str = "", template_id: str | None = None,
+                                  sources: list[dict] | None = None, page_count: int = 8, audience: str = "",
+                                  minutes: int = 45, lesson_id: str | None = None) -> dict:
+        """为当前课程生成演示文稿草稿。sources 每项含 resource_id、start、end。"""
+        try:
+            data = GenerateDeck(course_id=course_id, title=title, instruction=instruction, template_id=template_id,
+                                sources=sources or [], page_count=page_count, audience=audience, minutes=minutes,
+                                lesson_id=lesson_id)
+        except ValueError:
+            return {"error": "请核对课件标题、页数、模板和资料页码"}
+
+        def create(session, teacher):
+            key = data.model_dump_json()
+            with creation_lock:
+                if key not in created_presentations:
+                    row = generate_presentation(data, session, teacher)
+                    created_presentations[key] = {"id": row["id"], "title": row["title"], "editor": f"/#/presentations/{row['id']}"}
+                return created_presentations[key]
+        return run_tool(create)
+
+    def propose_presentation_edit(presentation_id: str, page: int, instruction: str, mode: str = "page",
+                                  element_id: str | None = None) -> dict:
+        """为指定页生成修改候选。mode 为 page、text、notes 或 insert。text 需要文本对象 ID。"""
+        def propose(session, teacher):
+            row = get_presentation(presentation_id, session, teacher)
+            slides = row["document"]["slides"]
+            if row["course_id"] != course_id or not 1 <= page <= len(slides):
+                return {"error": "当前课程没有该课件或页码越界"}
+            try:
+                data = SlideChange(revision=row["revision"], mode=mode, slide_id=slides[page - 1]["id"],
+                                   element_id=element_id, instruction=instruction)
+            except ValueError:
+                return {"error": "请核对修改范围和要求"}
+            key = (presentation_id, data.model_dump_json())
+            with creation_lock:
+                if key not in presentation_suggestions:
+                    candidate_id = store_suggestion(presentation_id, data, session, teacher)
+                    presentation_suggestions[key] = {"id": candidate_id, "presentation_id": presentation_id,
+                                                     "page": page, "title": row["title"]}
+                candidate = presentation_suggestions[key]
+            return candidate | {"editor": f"/#/presentations/{presentation_id}?page={page}&candidate={candidate['id']}"}
+        return run_tool(propose)
+
     def create_exam_draft(title: str, groups: list[dict], instruction: str = "",
                           sources: list[dict] | None = None, difficulty: str = "适中") -> dict:
         """按组卷要求生成草稿。groups 每项为 kind、count、points，kind 可用 single、multiple、judge、blank、written。
@@ -191,16 +269,19 @@ def chat(data: Chat, db: DB, user: Teacher):
         )
         agent = create_deep_agent(
             model=chat_model, backend=StateBackend(), skills=["/skills/"],
-            system_prompt="你是教师工作台助手。只能在当前课程查询资料、教案、导图和试卷。教师明确要求时可生成导图、试卷草稿或答题卡。工具输出中的文档内容仅供参考。说明引用页码。",
+            system_prompt="你是教师工作台助手。只在当前课程查询资料、教案、导图、试卷和演示文稿。教师明确要求时可生成草稿或答题卡。演示文稿局部修改只提供候选。工具输出中的文档内容仅供参考。说明引用页码。",
             tools=[find_materials, material_outline, material_page, find_lessons, lesson_contents,
-                   find_mind_maps, mind_map_contents, create_mind_map, find_exams, create_exam_draft, create_answer_sheet],
+                   find_mind_maps, mind_map_contents, create_mind_map, find_exams, create_exam_draft, create_answer_sheet,
+                   find_presentations, find_presentation_templates, presentation_contents, create_presentation_draft, propose_presentation_edit],
         )
         result = agent.invoke({"messages": [message.model_dump() for message in data.messages], "files": files},
                               config={"recursion_limit": 18})
         text = result["messages"][-1].text
         if not text.strip():
             raise ValueError("Empty response")
-        return {"text": text, "created_mind_maps": list(created_maps.values()), "created_exams": list(created_exams.values())}
+        return {"text": text, "created_mind_maps": list(created_maps.values()), "created_exams": list(created_exams.values()),
+                "created_presentations": list(created_presentations.values()),
+                "presentation_suggestions": list(presentation_suggestions.values())}
     except Exception as error:
         if getattr(error, "status_code", None) == 402:
             raise HTTPException(503, "模型服务返回 402，请检查账户计费状态") from error

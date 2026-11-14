@@ -1,0 +1,74 @@
+.presentation-filters { margin: 12px 0 18px; }
+.presentation-filters .segmented button { display: inline-flex; align-items: center; gap: 6px; }
+.presentation-template-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(210px,1fr)); gap: 16px; }
+.presentation-template-card { overflow: hidden; }
+.presentation-template-select { display: block; width: 100%; padding: 0; border: 0; background: transparent; text-align: left; }
+.presentation-template-caption { display:flex; justify-content:space-between; gap:8px; align-items:center; padding:10px 13px 5px; }
+.presentation-template-caption small, .presentation-template-headings { color:var(--muted); font-size:12px; }
+.presentation-template-headings { display:block; padding:0 13px 10px; line-height:1.55; }
+.presentation-template-select { padding-bottom:5px; }
+.presentation-template-card .actions { padding: 0 10px 8px; justify-content: flex-end; }
+.presentation-thumbnail { width: 100%; aspect-ratio: 16 / 9; overflow: hidden; }
+.presentation-outline { display: grid; gap: 8px; padding: 12px; }
+.presentation-form-cols { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 9px; }
+.presentation-form-cols input, .presentation-form-cols select { width: 100%; }
+.presentation-editor.page { max-width: none; padding-top: 18px; padding-bottom: 12px; }
+.presentation-heading { align-items: center; margin-bottom: 12px; }
+.presentation-workspace {
+  display: grid; grid-template-columns: 160px minmax(0,1fr) 222px; grid-template-rows: auto minmax(0,1fr);
+  overflow: hidden; min-height: 570px; height: calc(100dvh - 215px);
+}
+.presentation-toolbar { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items:center; gap: 7px; padding: 7px 10px; border-bottom: 1px solid var(--line); }
+.presentation-toolgroup { display: flex; align-items: center; flex-wrap: wrap; gap: 3px; }
+.presentation-toolbar .presentation-toolgroup + .presentation-toolgroup { border-inline-start: 1px solid var(--line); padding-inline-start: 8px; }
+.presentation-toolbar .button, .presentation-page-footer .button { min-height: 32px; padding: 4px 7px; white-space: nowrap; }
+.presentation-toolbar select, .presentation-pages select, .presentation-workspace-status select { min-height: 32px; padding: 4px 6px; font-size: 12px; }
+.presentation-pages { display: grid; grid-template-rows: auto minmax(0,1fr) auto; border-inline-end: 1px solid var(--line); min-height: 0; }
+.presentation-page-tools { display: flex; align-items: center; gap: 5px; padding: 8px; }
+.presentation-page-tools select { min-width: 0; flex: 1; }
+.presentation-page-list { display: flex; flex-direction: column; gap: 8px; padding: 2px 8px 8px; overflow-y: auto; }
+.presentation-page-tile { padding: 4px; width: 100%; flex-shrink: 0; background: transparent; border: 1px solid var(--line); border-radius: 7px; text-align: left; overflow: hidden; }
+.presentation-page-tile[aria-pressed="true"] { border-color: var(--accent); background: var(--raised); }
+.presentation-page-tile > span { display: block; font-size: 11px; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.presentation-page-footer { padding: 5px; border-top: 1px solid var(--line); }
+.presentation-center { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.presentation-canvas { display: grid; place-items: center; flex: 1; overflow: auto; min-height: 0; min-width: 0; padding: 12px; background: var(--raised); }
+.presentation-board { background: white; box-shadow: 0 3px 20px #11182720; }
+.presentation-workspace-status { min-height: 37px; padding: 1px 10px; display: flex; align-items: center; gap: 8px; justify-content: space-between; border-top: 1px solid var(--line); font-size: 12px; }
+.presentation-workspace-status label { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.presentation-workspace-status .button { min-height: 30px; padding: 3px 8px; }
+.presentation-notes { border-top: 1px solid var(--line); padding: 7px 10px; font-size: 12px; }
+.presentation-notes textarea { min-height: 52px; max-height: 125px; width: 100%; padding: 7px; }
+.presentation-citations { display: flex; gap: 5px 12px; flex-wrap: wrap; padding: 4px 10px; font-size: 12px; }
+.presentation-inspector { overflow-y: auto; border-inline-start: 1px solid var(--line); }
+.presentation-inspector-body { padding: 12px; display: grid; gap: 10px; }
+.presentation-inspector-body h3 { margin: 0; font-size: 14px; }
+.presentation-property-group { padding: 0; margin: 0; border: 0; display: grid; gap: 8px; min-width: 0; }
+.presentation-property-group label { font-size: 12px; }
+.presentation-property-group input, .presentation-property-group select { min-height: 32px; padding: 5px; }
+.presentation-color { display: flex; align-items: center; justify-content: space-between; }
+.presentation-color input[type=color] { width: 36px; height: 25px; min-height: 25px; padding: 1px 2px; }
+.presentation-control-row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.presentation-control-row .button { min-height: 30px; padding: 4px 7px; font-size: 12px; }
+.presentation-control-row [aria-pressed="true"] { background: var(--raised); color: var(--accent); }
+.presentation-layer-title { padding-top: 9px; border-top: 1px solid var(--line); }
+.presentation-layers { list-style: none; padding: 0; margin: 0; display: grid; gap: 3px; }
+.presentation-layers button { display: flex; align-items: center; gap: 5px; width: 100%; min-width: 0; padding: 5px 6px; background: transparent; border: 1px solid transparent; border-radius: 5px; text-align: left; }
+.presentation-layers button[aria-pressed="true"] { border-color: var(--accent); background: var(--raised); }
+.presentation-layers span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.presentation-player { position: fixed; inset: 0; z-index: 500; background: #121419; display: flex; flex-direction: column; }
+.presentation-player .presentation-canvas { background: transparent; }
+.presentation-play-controls { color: white; display: flex; gap: 9px; justify-content: center; align-items: center; padding: 8px; }
+.presentation-data-edit input { width: 125px; }
+.presentation-checkbox { display: flex; align-items: center; gap: 6px; }
+.presentation-candidate { padding: 12px; white-space: pre-wrap; }
+@media (max-width:1000px) {
+  .presentation-workspace { grid-template-columns: 118px minmax(0,1fr) 185px; }
+}
+@media (max-width:760px) {
+  .presentation-workspace { grid-template-columns: 91px minmax(0,1fr); grid-template-rows:auto minmax(350px,1fr) auto; min-height:0; height:auto; }
+  .presentation-inspector { grid-column: 1 / -1; border-inline-start:0; border-top:1px solid var(--line); max-height:360px; }
+  .presentation-page-list { max-height:430px; }
+  .presentation-page-tools { flex-wrap:wrap; }
+  .presentation-toolbar .presentation-toolgroup + .presentation-toolgroup { padding-inline-start: 3px; }
+}

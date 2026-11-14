@@ -25,6 +25,8 @@ async function send() {
     })
     messages.value = [...pending, {
       role: 'assistant', content: response.text, maps: response.created_mind_maps, exams: response.created_exams,
+      presentations: response.created_presentations,
+      presentationSuggestions: response.presentation_suggestions,
     }]
     input.value = ''
     await nextTick()
@@ -42,6 +44,9 @@ async function send() {
       <div v-else class="conversation" aria-live="polite">
         <div v-for="(message, index) in messages" :key="index" class="message" :class="message.role">
           {{ message.content }}
+          <RouterLink v-for="deck in message.presentations" :key="deck.id" class="text-link" :to="'/presentations/' + deck.id">打开课件「{{ deck.title }}」</RouterLink>
+          <RouterLink v-for="candidate in message.presentationSuggestions" :key="candidate.id" class="text-link"
+            :to="{name:'presentation',params:{id:candidate.presentation_id},query:{page:candidate.page,candidate:candidate.id}}">查看「{{ candidate.title }}」第 {{ candidate.page }} 页候选</RouterLink>
           <RouterLink v-for="map in message.maps" :key="map.id" class="text-link" :to="`/mind-maps/${map.id}`">打开导图「{{ map.title }}」</RouterLink>
           <RouterLink v-for="exam in message.exams" :key="exam.id" class="text-link" :to="`/exams/${exam.id}`">打开试卷「{{ exam.title }}」</RouterLink>
         </div>

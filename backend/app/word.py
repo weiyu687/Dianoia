@@ -15,8 +15,8 @@ DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.docu
 MAX_WORD_BYTES = 25 * 1024 * 1024
 
 
-def convert_word(content, extension, format_spec):
-    with TemporaryDirectory(prefix="dianoia-word-") as folder:
+def convert_office_document(content, extension, format_spec, *, label="Word"):
+    with TemporaryDirectory(prefix="dianoia-office-") as folder:
         directory = Path(folder)
         source = directory / f"document.{extension}"
         source.write_bytes(content)
@@ -25,12 +25,15 @@ def convert_word(content, extension, format_spec):
         except FileNotFoundError as error:
             raise HTTPException(503, "请配置可用的 LibreOffice") from error
         except subprocess.TimeoutExpired as error:
-            raise HTTPException(504, "Word 转换超时，请稍后重试") from error
+            raise HTTPException(504, f"{label} 转换超时，请稍后重试") from error
         except subprocess.CalledProcessError as error:
-            raise HTTPException(422, "Word 转换失败，请检查文件是否损坏") from error
+            raise HTTPException(422, f"{label} 转换失败，请检查文件是否损坏") from error
         if converted is None:
-            raise HTTPException(503, "未生成转换文件，请检查 LibreOffice 配置和 Word 文件")
+            raise HTTPException(503, f"未生成转换文件，请检查 LibreOffice 配置和 {label} 文件")
         return converted.read_bytes()
+
+
+convert_word = convert_office_document
 
 
 def word_pdf(content):

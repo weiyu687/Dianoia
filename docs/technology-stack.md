@@ -55,10 +55,18 @@
 
 试卷公式编辑采用 MathLive 0.111.4 提供可视输入和数学键盘，沿用 KaTeX 0.16.47 提供实时预览。MathLive 按需加载，字体随前端提供。后端使用 latex2mathml 3.81.1 和受支持的 MathML 到 OMML 映射生成 Word 原生公式，omml2latex 0.1.1 用于读取可识别的导入公式。现有 DOCX Editor 2.37.0 通过 Flat OPC 写入公式，网页画布的公式以 KaTeX 字形排版，普通 PDF 由 LibreOffice 生成。已验证 Chrome 保存重开后的矩阵编辑、分式录入和答案预览，以及高数和线代样卷的 LibreOffice 与 XeLaTeX 导出。[MathLive 数学键盘](https://mathlive.io/mathfield/guides/virtual-keyboard/) · [Microsoft Office Math](https://learn.microsoft.com/en-us/office/math/) · [NIST 关于 LaTeX 与 MathML 表示的研究](https://tsapps.nist.gov/publication/get_pdf.cfm?pub_id=925433)
 
+### 教学演示文稿
+
+确认分步交付。编辑器参考 PPTist 的操作布局，采用 Vue 3、Konva 10.9.1 与 vue-konva 4.0.1。应用保存可独立校验的幻灯片和对象数据，中文文本编辑使用浏览器原生输入控件。后端复用 FastAPI、SQLAlchemy、python-pptx 1.0.2 和 LibreOffice Impress，由同一份已保存数据导出可编辑 PPTX 和 PDF。Python 环境已完成文本、形状、表格、图表、讲者备注及 PDF 的最小验证。另一候选 ONLYOFFICE 适合原生 PPTX 编辑，已有母版、动画和复杂对象的往返保真另外验收。[Vue Konva](https://konvajs.org/docs/vue/index.html) · [python-pptx](https://python-pptx.readthedocs.io/en/latest/) · [PPTist](https://github.com/pipipi-pikachu/PPTist)
+
+国内容例用于提炼教学版式，平台用原创通用模板提供授课、实验、实训、习题、案例、研讨、复习、微课等场景。AI 采用大纲与页面分阶段生成，局部生成以页或选中对象为目标，结构化候选按版本采纳。参考资料复用课程资料库的页码范围和访问校验。Agent 复用教师课件服务。[清华大学公开演示文档模板](https://www.env.tsinghua.edu.cn/info/1344/7931.htm) · [西安交通大学实验教学管理规范](https://jxjc.xjtu.edu.cn/info/1033/1129.htm) · [PPTAgent](https://aclanthology.org/2025.emnlp-main.728/) · [DECKBench](https://arxiv.org/abs/2602.13318)
+
+Pillow `>=12.2,<14` 用于服务器端验证 PNG、JPEG 的文件格式与解码上限，本机验证版本为 13.0.0。前端构建将画布依赖放入按需加载的课件模块。运行 PDF 导出需要可执行的 LibreOffice Impress 和与课件匹配的中文字体，支持通过 `DIANOIA_SOFFICE` 指定路径。Chrome 验证模板创建、拖拽、编辑、放映和下载，PPTX 已复读验证原生文字、表格、图表和备注，PDF 已验证五页输出。整稿、局部备注、Agent 草稿及候选使用真实模型验证，资料范围传入通过固定测试材料回归。
+
 ## 待验证和待选型
 
 - 资料向量检索的候选为 PostgreSQL + pgvector 与 Qwen3-Embedding。以真实中文课程样本比较证据召回、章节切分与引用页码后再确认。
 - 对话持久化、Agent 修改教案、耗时任务队列、数据库迁移、对象存储及生产部署需要单独验收。
-- 知识框架、PPT、批改、学情分析、数字人和语音分别进入组件选型流程。
+- 知识框架、批改、学情分析、数字人和语音分别进入组件选型流程。
 
 后续每个组件获批后，在本页记录日期、技术及版本、选择理由、运行条件和验证结果。依赖变更同时更新依赖文件和开发日志。

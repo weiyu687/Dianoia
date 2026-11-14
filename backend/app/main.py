@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from . import admin, agent, ai, auth, exams, lesson_templates, lessons, mind_maps, resources
+from . import admin, agent, ai, auth, exams, lesson_templates, lessons, mind_maps, presentations, resources
 from .db import Base, engine
 
 
@@ -34,5 +34,5 @@ def health():
     return {"status": "ok"}
 
 
-for feature in (auth, admin, resources, lessons, lesson_templates, ai, mind_maps, exams, agent):
+for feature in (auth, admin, resources, lessons, lesson_templates, ai, mind_maps, exams, presentations, agent):
     app.include_router(feature.router)

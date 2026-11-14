@@ -12,6 +12,7 @@ from docx.oxml.ns import qn
 from docx.shared import Pt
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
+from pptx import Presentation
 from pypdf import PdfReader
 from reportlab.pdfgen.canvas import Canvas
 from sqlalchemy.orm import Session
@@ -167,6 +168,7 @@ class WorkflowTest(unittest.TestCase):
                 self.assertEqual(suggestion["text"], "函数设计的重要要求。")
 
                 private_template = self.check_lesson_templates(client, course, route)
+                presentation, slide_template = self.check_presentations(client, course, resource["id"])
                 mind_map, map_template = self.check_mind_maps(client, course, resource["id"])
                 exam = self.check_exams(client, course)
                 second_teacher = login("t02", "teacher")
@@ -178,10 +180,61 @@ class WorkflowTest(unittest.TestCase):
                 self.assertEqual(client.get(f"/api/mind-maps/{mind_map}").status_code, 404)
                 self.assertEqual(client.get(f"/api/mind-map-templates/{map_template}").status_code, 404)
                 self.assertEqual(client.get(f"/api/exams/{exam}").status_code, 404)
+                self.assertEqual(client.get(f"/api/presentations/{presentation}").status_code, 404)
+                self.assertEqual(client.get(f"/api/presentation-templates/{slide_template}").status_code, 404)
                 self.assertEqual(client.post("/api/lessons", json={
                     "course_id": second_teacher["courses"][0]["id"], "title": "未授权模板",
                     "template_id": private_template,
                 }).status_code, 404)
+
+    def check_presentations(self, client, course, resource_id):
+        from app.presentation_document import Deck
+        from app.presentation_templates import PRESETS, builtin
+
+        decks, templates = "/api/presentations", "/api/presentation-templates"
+        for key in PRESETS:
+            Deck.model_validate(builtin(key)["document"])
+        self.assertEqual(len(client.get(templates).raise_for_status().json()), 10)
+        source = {"resource_id": resource_id, "start": 2, "end": 2}
+        outline = [{"title": title} for title in ("隔离级别", "概念", "实验")]
+        pages = [{"layout": "body", "points": ["阅读实验记录"], "notes": "比较事务隔离效果",
+                  "citations": [source], **entry} for entry in outline]
+        data = {"course_id": course, "title": "事务实训", "template_id": "practice", "sources": [source], "page_count": 3}
+        with patch("app.presentations.generate", side_effect=[json.dumps({"pages": outline}), json.dumps({"pages": pages})]) as model:
+            data["outline"] = client.post(f"{decks}/outline", json=data).raise_for_status().json()
+            deck = client.post(f"{decks}/generate", json=data).raise_for_status().json()
+            for call in model.call_args_list:
+                self.assertIn("Repeatable read", call.args[1])
+                self.assertNotIn("Transactions have clear boundaries", call.args[1])
+        detail = f"{decks}/{deck['id']}"
+        first = deck["document"]["slides"][0]
+        title = next(item for item in first["elements"] if item["role"] == "title")
+        self.assertEqual(title["text"], "隔离级别")
+        self.assertEqual(first["citations"], [source])
+        with patch("app.presentations.generate", return_value="补充一个实验步骤") as model:
+            candidate = client.post(f"{detail}/suggest", json={
+                "revision": deck["revision"], "slide_id": first["id"], "mode": "text", "element_id": title["id"],
+            }).raise_for_status().json()
+            self.assertIn("Repeatable read", model.call_args.args[1])
+        self.assertEqual(candidate["text"], "补充一个实验步骤")
+        self.assertEqual(client.get(detail).json()["revision"], 1)
+        title["text"] = candidate["text"]
+        saved = client.put(detail, json=deck).raise_for_status().json()
+        self.assertEqual(saved["revision"], 2)
+        self.assertEqual(client.put(detail, json=deck).status_code, 409)
+        template = client.post(f"{detail}/template", json={
+            "revision": saved["revision"], "title": "实训样式", "layout_only": True,
+        }).raise_for_status().json()
+        new = client.post(decks, json={
+            "course_id": course, "title": "复用实训版式", "template_id": template["id"],
+        }).raise_for_status().json()
+        self.assertEqual(new["document"]["sources"], [])
+        self.assertTrue(all(not slide["citations"] for slide in new["document"]["slides"]))
+        pptx = Presentation(BytesIO(client.get(f"{detail}/export/pptx").raise_for_status().content))
+        self.assertEqual(len(pptx.slides), 3)
+        self.assertEqual(pptx.slides[0].shapes[1].text, candidate["text"])
+        self.assertEqual(pptx.slides[0].notes_slide.notes_text_frame.text, first["notes"])
+        return deck["id"], template["id"]
 
     def check_mind_maps(self, client, course, resource_id):
         maps, templates = "/api/mind-maps", "/api/mind-map-templates"
