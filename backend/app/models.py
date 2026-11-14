@@ -174,6 +174,16 @@ class ExamAnswerDocument(Base):
     based_on_revision: Mapped[int] = mapped_column(Integer)
 
 
+class ExamAnswerSheet(Base):
+    __tablename__ = "exam_answer_sheets"
+
+    exam_id: Mapped[str] = mapped_column(ForeignKey("exams.id", ondelete="CASCADE"), primary_key=True)
+    content: Mapped[bytes] = mapped_column(LargeBinary)
+    layout: Mapped[dict] = mapped_column(JSON)
+    question_signature: Mapped[str] = mapped_column(String(64))
+    edited: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
 class ExamTemplate(Base):
     __tablename__ = "exam_templates"
 

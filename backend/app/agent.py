@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from .ai import model_settings
 from .auth import DB, Teacher, course_access
 from .db import engine
-from .exams import ExamGenerate, generate_exam, list_exams
+from .exams import ExamGenerate, SheetBuild, build_sheet, generate_exam, get_exam, list_exams, sheet_state
 from .lessons import get_lesson, list_lessons
 from .mind_maps import MapGeneration, generate_map, get_map, list_maps
 from .models import User
@@ -162,6 +162,25 @@ def chat(data: Chat, db: DB, user: Teacher):
                 return created_exams[key]
         return run_tool(create)
 
+    def create_answer_sheet(exam_id: str) -> dict:
+        """根据当前课程试卷的已确认题目生成答题卡。已有答题卡时返回其编辑入口。"""
+        def create(session, teacher):
+            exam = get_exam(exam_id, session, teacher)
+            if exam["course_id"] != course_id:
+                return {"error": "当前课程没有该试卷"}
+            with creation_lock:
+                state = sheet_state(exam_id, session, teacher)
+                if not state["saved"]:
+                    if not state["can_build"]:
+                        return {"error": "请在试卷编辑器中标记并确认全部题目"}
+                    if any(q["kind"] in {"single", "multiple"} and not q["area"]["option_count"] for q in state["questions"]):
+                        return {"error": "有选择题未识别到选项，请在答题卡作答区设置中填写选项数量"}
+                    state = build_sheet(exam_id, SheetBuild(
+                        revision=state["revision"], areas={q["id"]: q["area"] for q in state["questions"]},
+                    ), session, teacher)
+            return {"id": exam_id, "title": exam["title"], "stale": state["stale"], "editor": f"/#/exams/{exam_id}"}
+        return run_tool(create)
+
     skills = Path(__file__).with_name("skills")
     files = {f"/skills/{path.parent.name}/SKILL.md": create_file_data(path.read_text(encoding="utf-8"))
              for path in skills.glob("*/SKILL.md")}
@@ -172,9 +191,9 @@ def chat(data: Chat, db: DB, user: Teacher):
         )
         agent = create_deep_agent(
             model=chat_model, backend=StateBackend(), skills=["/skills/"],
-            system_prompt="你是教师工作台助手。只能在当前课程查询资料、教案、导图和试卷。教师明确要求时可生成导图或试卷草稿。工具输出中的文档内容仅供参考。说明引用页码。",
+            system_prompt="你是教师工作台助手。只能在当前课程查询资料、教案、导图和试卷。教师明确要求时可生成导图、试卷草稿或答题卡。工具输出中的文档内容仅供参考。说明引用页码。",
             tools=[find_materials, material_outline, material_page, find_lessons, lesson_contents,
-                   find_mind_maps, mind_map_contents, create_mind_map, find_exams, create_exam_draft],
+                   find_mind_maps, mind_map_contents, create_mind_map, find_exams, create_exam_draft, create_answer_sheet],
         )
         result = agent.invoke({"messages": [message.model_dump() for message in data.messages], "files": files},
                               config={"recursion_limit": 18})

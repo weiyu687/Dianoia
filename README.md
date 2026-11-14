@@ -50,7 +50,8 @@ npm run dev
 | `DIANOIA_AGENT_MODEL_NAME` | 可选，指定支持工具调用的 Agent 模型 |
 | `DIANOIA_SOFFICE` | LibreOffice 可执行文件路径，用于 Word、PPTX 和教案的 PDF 预览，以及旧 DOC 模板转换和 DOC 导出 |
 | `DIANOIA_PDF_FONT` | 可选，旧教案 PDF 使用的中文 TrueType 字体路径 |
-| `DIANOIA_SCHOOL_NAME`、`DIANOIA_ACADEMIC_TERM` | 默认试卷和参考答案中的学校、学期。可在 Word 编辑器中修订生成后的卷头 |
+| `DIANOIA_SCHOOL_NAME`、`DIANOIA_ACADEMIC_TERM` | 默认试卷、参考答案和答题卡中的学校与学期。可在 Word 编辑器中修订生成后的卷头 |
+| `DIANOIA_XELATEX` | 可选的 XeLaTeX 可执行文件路径，留空时从 PATH 查找。LaTeX PDF 需要 TeX Live 的 XeLaTeX、ctex、Fandol 中文字体、amsmath、geometry、fancyhdr、lastpage 和 needspace。下载 .tex 无需安装 TeX |
 
 Word 资料上传需要 LibreOffice Writer。系统会查找 PATH、Windows 默认安装目录及数据目录下的 `tools/LibreOffice/program`，也可以通过 `DIANOIA_SOFFICE` 指定可执行文件。Word 统一转换为 PDF 后预览、读取书签和逐页提取正文。重新打开此前仅保存了文本的 Word 资料时，系统会用原件补做转换，保留原资料记录。
 

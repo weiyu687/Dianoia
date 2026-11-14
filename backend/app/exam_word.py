@@ -15,8 +15,9 @@ from .lessons import chinese_lesson_document, set_chinese_typeface
 from .models import identifier
 
 TYPES = {"single": "单项选择题", "multiple": "多项选择题", "judge": "判断题", "blank": "填空题", "written": "解答题"}
+SECTION_NUMBERS = "一二三四五六七八九十"
 PREFIX = re.compile(r"^\s*(?:\d{1,3}[.．、)）]|[（(]\d{1,3}[）)])\s*")
-SCORE = re.compile(r"[（(]\s*(\d{1,3}|[XxＸ×]+)\s*分\s*[）)]")
+SCORE = re.compile(r"[（(]\s*(\d{1,3}|[XxＸ×_＿]+)\s*分\s*[）)]")
 SECTION = re.compile(r"^\s*[一二三四五六七八九十]+[、．.]")
 ANSWERS = re.compile(r"^\s*(?:(?:第?\s*\d+\s*[.、．）)]\s*)?(?:参考答案|正确答案|答案|参考解析|试题解析|评分标准|评分细则|答案与解析))(?:\s*[:：]|\s*$)")
 OPTION = re.compile(r"^\s*([A-H])[.．、)）]\s*(.+)")
@@ -208,15 +209,15 @@ def exam_field(paragraph, field):
     run._r.addnext(element)
 
 
-def heading_table(document, rows, widths, *, centered=False):
+def heading_table(document, rows, widths, *, centered=False, grid=True, height=8):
     table = document.add_table(rows=len(rows), cols=len(widths))
-    table.style = "Table Grid"
+    table.style = "Table Grid" if grid else "Normal Table"
     table.autofit = False
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     for column, width in zip(table.columns, widths):
         column.width = Mm(width)
     for row, values in zip(table.rows, rows):
-        row.height = Mm(8)
+        row.height = Mm(height)
         for cell, text, width in zip(row.cells, values, widths):
             cell.width = Mm(width)
             cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
@@ -226,6 +227,33 @@ def heading_table(document, rows, widths, *, centered=False):
                 paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
             paragraph.add_run(text)
     return table
+
+
+def exam_info(document, course, teacher, term, class_name):
+    table = heading_table(document, [
+        ("课程名称", course, "姓　名", "________________"),
+        ("学年学期", term or "________________", "学　号", "________________"),
+        ("任课教师", teacher or "________________", "教学班", class_name or "________________"),
+        ("考试方式", "□ 闭卷　□ 开卷", "卷　别", "□ A 卷　□ B 卷"),
+    ], (25, 61, 23, 55), grid=False, height=8)
+    for row in table.rows:
+        for index in (0, 2):
+            row.cells[index].paragraphs[0].runs[0].bold = True
+
+
+def exam_section(document, label, *, scoring=False):
+    heading = document.add_heading(label, level=1)
+    heading.paragraph_format.space_before = Pt(13)
+    heading.paragraph_format.space_after = Pt(6)
+    heading.runs[0].font.color.rgb = RGBColor(0, 0, 0)
+    heading.runs[0].font.size = Pt(12)
+    if scoring:
+        table = heading_table(document, [("得分", ""), ("评分人", "")], (20, 24), centered=True, height=6)
+        table.alignment = WD_TABLE_ALIGNMENT.RIGHT
+        # Keep the title and both scoring rows with at least the first question.
+        for row in table.rows:
+            for cell in row.cells:
+                cell.paragraphs[0].paragraph_format.keep_with_next = True
 
 
 def exam_layout():
@@ -257,26 +285,26 @@ def exam_heading(document, text, size, *, color="000000"):
 
 def default_paper(title, course_name, *, school="", teacher="", term="", class_name="", groups=()):
     document = exam_layout()
-    for text, size in ((f"{school}考试试卷", 23), (title, 15)):
-        exam_heading(document, text, size)
-    heading_table(document, [
-        (f"课程名称：{course_name}", f"学期：{term or '________________'}"),
-        (f"任课教师：{teacher or '________________'}", f"考试班级：{class_name or '________________'}"),
-        ("考试时间：________________", "考试时长：________ 分钟"),
-        ("考试方式：□ 闭卷　□ 开卷", "试卷类别：□ A 卷　□ B 卷"),
-        ("姓名：________________", "学号：________________"),
-    ], (82, 82))
-    document.add_paragraph()
-    labels = list("一二三四五")[:len(groups)] if groups else list("一二三四五")
-    subtotal = [str(group.count * group.points) for group in groups] if groups else [""] * len(labels)
-    total = str(sum(group.count * group.points for group in groups)) if groups else ""
+    exam_heading(document, f"{school}期末考试试卷", 19)
+    if re.sub(r"\s+", "", title).casefold() != re.sub(r"\s+", "", course_name).casefold() and title != f"{school}期末考试试卷":
+        exam_heading(document, title, 12)
+    exam_info(document, course_name, teacher, term, class_name)
+    labels = list(SECTION_NUMBERS[:len(groups) if groups else 5])
+    total = str(sum(group.count * group.points for group in groups)) if groups else "______"
+    details = document.add_paragraph()
+    details.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    details.paragraph_format.space_before = Pt(8)
+    details.add_run(f"考试时长  ______ 分钟　　　　卷面总分  {total} 分").bold = True
     column_count = len(labels) + 2
     heading_table(document, [
-        ["题号", *labels, "总分"], ["满分", *subtotal, total],
-        ["得分", *([""] * (column_count - 1))], ["阅卷人", *([""] * (column_count - 1))],
-    ], (30, *([134 / (column_count - 1)] * (column_count - 1))), centered=True)
-    document.add_paragraph("考试说明：请按题号顺序作答，按监考要求填写个人信息。")
-    document.add_paragraph()
+        ["题　号", *labels, "总　分"], ["得　分", *([""] * (column_count - 1))],
+    ], (23, *([141 / (column_count - 1)] * (column_count - 1))), centered=True, height=7)
+    document.add_paragraph("考生须知：请填写姓名、学号和教学班，按题号顺序作答。")
+    if not groups:
+        exam_section(document, "一、____________（共____题，共____分）", scoring=True)
+        for index in range(1, 3):
+            document.add_paragraph(f"{index}. （____分）")
+        document.add_paragraph()
     return document
 
 
@@ -341,24 +369,39 @@ def add_questions(document, questions, *, use_template=False):
             raise HTTPException(422, "该 Word 没有试卷正文占位符。可从模板创建副本后标记题目，或使用默认版式组卷。")
     metadata = {}
     counts = {}
+    groups = {}
     for question in questions:
+        count, points = groups.get(question.kind, (0, 0))
+        groups[question.kind] = count + 1, points + question.points
+    for index, question in enumerate(questions):
         kind = question.kind
         if kind not in counts:
-            heading = document.add_heading(TYPES[kind], level=1)
-            heading.runs[0].font.color.rgb = RGBColor(0, 0, 0)
             if anchor is not None:
+                heading = document.add_heading(TYPES[kind], level=1)
+                heading.runs[0].font.color.rgb = RGBColor(0, 0, 0)
                 anchor.addprevious(heading._p)
+            else:
+                count, points = groups[kind]
+                exam_section(document, f"{SECTION_NUMBERS[len(counts)]}、{TYPES[kind]}（共{count}题，共{points}分）", scoring=True)
             counts[kind] = 0
         counts[kind] += 1
         paragraphs = [document.add_paragraph(f"{counts[kind]}. {question.stem}（{question.points}分）")]
+        if anchor is None:
+            paragraphs[0].paragraph_format.space_after = Pt(4)
         for i, option in enumerate(question.options):
-            paragraphs.append(document.add_paragraph(f"{chr(65 + i)}. {option}"))
+            paragraph = document.add_paragraph(f"{chr(65 + i)}. {option}")
+            if anchor is None:
+                paragraph.paragraph_format.left_indent = Mm(5)
+                paragraph.paragraph_format.space_after = Pt(2)
+            paragraphs.append(paragraph)
+        if question.options and anchor is None:
+            paragraphs[0].paragraph_format.keep_with_next = True
         if anchor is not None:
             for p in paragraphs:
                 anchor.addprevious(p._p)
         key = mark(paragraphs)
         metadata[key] = question.model_dump(exclude={"stem", "options"}) | {"confirmed": True}
-        if kind == "written":
+        if kind == "written" and (anchor is not None or index + 1 < len(questions)):
             paragraph = document.add_paragraph()
             if anchor is not None:
                 anchor.addprevious(paragraph._p)

@@ -13,15 +13,17 @@ from sqlalchemy.orm import defer
 
 from .ai import generate
 from .auth import DB, Teacher, course_access
+from .exam_sheet import AnswerArea, SheetBuild, answer_sheet, default_area, prepare_areas, print_questions, question_signature, require_questions
+from .exam_tex import exam_tex, xelatex_pdf
 from .exam_word import add_questions, answer_marked, answer_paper, default_paper, detect, ensure_body_paragraph, ranges, replace_question
 from .lessons import Source, Title, lesson_sources, serialize_docx
-from .models import ClassGroup, Course, Exam, ExamAnswerDocument, ExamDocument, ExamTemplate, now
+from .models import ClassGroup, Course, Exam, ExamAnswerDocument, ExamAnswerSheet, ExamDocument, ExamTemplate, now
 from .word import DOCX_MIME, convert_word, read_word_upload, word_pdf
 
 router = APIRouter(prefix="/api", tags=["exams"])
 Kind = Literal["single", "multiple", "judge", "blank", "written"]
-Format = Literal["doc", "docx", "pdf"]
-Variant = Literal["paper", "answers"]
+Format = Literal["doc", "docx", "pdf", "tex", "latex-pdf"]
+Variant = Literal["paper", "answers", "sheet"]
 
 
 class Question(BaseModel):
@@ -163,7 +165,7 @@ def has_answer_markers(document):
     )
 
 
-def store(db, user, data, document, *, questions=None, imported=False, reviewed=False, answer=None):
+def store(db, user, data, document, *, questions=None, imported=False, reviewed=False, answer=None, sheet=None):
     ensure_body_paragraph(document)
     row = Exam(owner_id=user.id, course_id=data.course_id, title=data.title, imported=imported,
                reviewed=reviewed, questions=questions or {}, sources=[source.model_dump() for source in data.sources])
@@ -173,6 +175,9 @@ def store(db, user, data, document, *, questions=None, imported=False, reviewed=
     if answer is not None:
         content, current = answer
         db.add(ExamAnswerDocument(exam_id=row.id, content=content, based_on_revision=1 if current else 0))
+    if sheet is not None:
+        db.add(ExamAnswerSheet(exam_id=row.id, content=sheet.content, layout=sheet.layout,
+                               question_signature=sheet.question_signature, edited=sheet.edited))
     db.commit()
     return row_view(row, document)
 
@@ -353,7 +358,7 @@ def copy_exam(exam_id: str, db: DB, user: Teacher):
     saved = db.get(ExamAnswerDocument, exam_id)
     answer = (saved.content, saved.based_on_revision == row.revision) if saved else None
     return store(db, user, data, document, questions=row.questions, imported=row.imported,
-                 reviewed=row.reviewed, answer=answer)
+                 reviewed=row.reviewed, answer=answer, sheet=db.get(ExamAnswerSheet, exam_id))
 
 
 @router.delete("/exams/{exam_id}", status_code=204)
@@ -375,8 +380,8 @@ def target_question(db, user, exam_id, key, expected):
 
 @router.put("/exams/{exam_id}/questions/{key}")
 def save_question(exam_id: str, key: str, data: QuestionUpdate, db: DB, user: Teacher):
-    row, _, document, _ = target_question(db, user, exam_id, key, data.revision)
-    entry = row.questions.get(key, {}) | data.model_dump(exclude={"revision"})
+    row, _, document, target = target_question(db, user, exam_id, key, data.revision)
+    entry = row.questions.get(key, {}) | data.model_dump(exclude={"revision"}) | {"placeholder": not target.parts[0].strip()}
     version(db, row, data.revision, questions=row.questions | {key: entry})
     db.commit()
     return row_view(row, document)
@@ -457,15 +462,25 @@ def update_sources(exam_id: str, data: ExamSources, db: DB, user: Teacher):
     return row_view(row, decode(stored_document(db, row).content))
 
 
+def print_fields(db, user, row, document):
+    first_table = next(iter(document.tables), None)
+    class_name = ""
+    if first_table is not None:
+        for line in first_table.rows:
+            values = [cell.text.strip() for cell in line.cells]
+            for index, value in enumerate(values):
+                if value == "教学班" and index + 1 < len(values):
+                    class_name = values[index + 1]
+                elif value.startswith("考试班级："):
+                    class_name = value.removeprefix("考试班级：").strip()
+    return {"title": row.title, "course": db.get(Course, row.course_id).name, "teacher": user.name,
+            "class_name": class_name if class_name.strip("_＿") else "", **school_fields()}
+
+
 def generated_answers(db, user, row):
     document = decode(stored_document(db, row).content)
     questions = row_view(row, document)["questions"]
-    first_table = next(iter(document.tables), None)
-    class_name = next((cell.text.removeprefix("考试班级：").strip()
-                       for line in first_table.rows for cell in line.cells
-                       if cell.text.startswith("考试班级：")), "") if first_table is not None else ""
-    return serialize_docx(answer_paper(row.title, db.get(Course, row.course_id).name, user.name,
-                                     questions, class_name=class_name, **school_fields()))
+    return serialize_docx(answer_paper(questions=questions, **print_fields(db, user, row, document)))
 
 
 @router.get("/exams/{exam_id}/answers")
@@ -503,24 +518,124 @@ def save_answer_document(exam_id: str, db: DB, user: Teacher, file: Annotated[Up
     return {"revision": row.revision, "saved": True, "stale": False}
 
 
+def sheet_context(db, user, row):
+    document = decode(stored_document(db, row).content)
+    return print_fields(db, user, row, document), print_questions(document, row.questions)
+
+
+def sheet_view(row, fields, questions, saved):
+    stale = bool(saved and saved.question_signature != question_signature(questions, fields))
+    return {"revision": row.revision, "saved": saved is not None, "stale": stale, "edited": bool(saved and saved.edited),
+            "can_build": bool(questions) and len(questions) <= 200 and all(q.confirmed and not q.placeholder for q in questions),
+            "questions": [{"id": q.id, "kind": q.kind, "group": q.group, "number": q.number,
+                           "stem": q.stem[:140], "option_count": len(q.options),
+                           "area": (saved.layout.get(q.id) if saved else None) or default_area(q).model_dump()}
+                          for q in questions[:200]]}
+
+
+@router.get("/exams/{exam_id}/sheet")
+def sheet_state(exam_id: str, db: DB, user: Teacher):
+    row = owned(db, user, exam_id)
+    fields, questions = sheet_context(db, user, row)
+    return sheet_view(row, fields, questions, db.get(ExamAnswerSheet, exam_id))
+
+
+def update_sheet_revision(db, row, revision):
+    version(db, row, revision)
+    answers = db.get(ExamAnswerDocument, row.id)
+    if answers and answers.based_on_revision == revision:
+        answers.based_on_revision = revision + 1
+
+
+@router.put("/exams/{exam_id}/sheet")
+def build_sheet(exam_id: str, data: SheetBuild, db: DB, user: Teacher):
+    row = owned(db, user, exam_id)
+    assert_revision(row, data.revision)
+    fields, questions = sheet_context(db, user, row)
+    prepare_areas(questions, data.areas)
+    saved = db.get(ExamAnswerSheet, exam_id)
+    if saved and saved.edited and not data.replace_edits:
+        raise HTTPException(409, "答题卡有手动修改，请确认后重新生成")
+    content = serialize_docx(answer_sheet(fields, questions, data.areas))
+    update_sheet_revision(db, row, data.revision)
+    if saved is None:
+        saved = ExamAnswerSheet(exam_id=exam_id)
+        db.add(saved)
+    saved.content = content
+    saved.layout = {key: area.model_dump() for key, area in data.areas.items()}
+    saved.question_signature = question_signature(questions, fields)
+    saved.edited = False
+    db.commit()
+    return sheet_view(row, fields, questions, saved)
+
+
+@router.get("/exams/{exam_id}/sheet/document")
+def sheet_document(exam_id: str, db: DB, user: Teacher, revision: int):
+    row = owned(db, user, exam_id)
+    assert_revision(row, revision)
+    saved = db.get(ExamAnswerSheet, exam_id)
+    if saved is None:
+        raise HTTPException(404, "请先生成答题卡")
+    return Response(saved.content, media_type=DOCX_MIME)
+
+
+@router.put("/exams/{exam_id}/sheet/document")
+def save_sheet_document(exam_id: str, db: DB, user: Teacher, file: Annotated[UploadFile, File()],
+                        revision: Annotated[int, Form(ge=1)]):
+    row = owned(db, user, exam_id)
+    assert_revision(row, revision)
+    saved = db.get(ExamAnswerSheet, exam_id)
+    if saved is None:
+        raise HTTPException(404, "请先生成答题卡")
+    _, content, document = read_word_upload(file)
+    if ensure_body_paragraph(document):
+        content = serialize_docx(document)
+    fields, questions = sheet_context(db, user, row)
+    update_sheet_revision(db, row, revision)
+    saved.content, saved.edited = content, True
+    db.commit()
+    return sheet_view(row, fields, questions, saved)
+
+
 @router.get("/exams/{exam_id}/export/{variant}/{format}")
 def export_exam(exam_id: str, variant: Variant, format: Format, db: DB, user: Teacher, inline: bool = False):
     row = owned(db, user, exam_id)
     content = stored_document(db, row).content
-    inline = inline and format == "pdf"
+    inline = inline and format in {"pdf", "latex-pdf"}
+    latex = format in {"tex", "latex-pdf"}
+    sheet = db.get(ExamAnswerSheet, exam_id) if variant == "sheet" else None
     if variant == "paper":
-        if not inline and (not row.reviewed or has_answer_markers(decode(content))):
+        if (latex or not inline) and (not row.reviewed or has_answer_markers(decode(content))):
             raise HTTPException(422, "请先核对学生卷正文并确认已移出参考答案")
-    else:
+    elif variant == "sheet":
+        if sheet is None:
+            raise HTTPException(404, "请先生成答题卡")
+        content = sheet.content
+    elif not latex:
         saved = db.get(ExamAnswerDocument, exam_id)
         content = saved.content if saved else generated_answers(db, user, row)
-    media = {"docx": DOCX_MIME, "doc": "application/msword", "pdf": "application/pdf"}[format]
-    if format == "pdf":
+    media = {"docx": DOCX_MIME, "doc": "application/msword", "pdf": "application/pdf",
+             "tex": "application/x-tex", "latex-pdf": "application/pdf"}[format]
+    if latex:
+        fields, questions = sheet_context(db, user, row)
+        require_questions(questions, tex=variant == "paper")
+        areas = None
+        if sheet:
+            if sheet.question_signature != question_signature(questions, fields):
+                raise HTTPException(409, "试卷题目或卷头已更新，请先按当前试卷重新生成答题卡")
+            areas = {key: AnswerArea.model_validate(value) for key, value in sheet.layout.items()}
+            prepare_areas(questions, areas)
+        content = exam_tex(fields, questions, variant, areas)
+        if format == "latex-pdf":
+            content = xelatex_pdf(content)
+    elif format == "pdf":
         content = word_pdf(content)
     elif format == "doc":
         content = convert_word(content, "docx", "doc:MS Word 97")
-    suffix = "（参考答案）" if variant == "answers" else "（待核对预览）" if not row.reviewed else ""
-    filename = quote(f"{row.title}{suffix}.{format}", safe="")
+    suffix = {"answers": "（参考答案）", "sheet": "（答题卡）"}.get(variant, "（待核对预览）" if not row.reviewed else "")
+    extension = "pdf" if format == "latex-pdf" else format
+    mode = " LaTeX" if format == "latex-pdf" else ""
+    filename = quote(f"{row.title}{suffix}{mode}.{extension}", safe="")
     return Response(content, media_type=media,
                     headers={"Content-Disposition": f"{'inline' if inline else 'attachment'}; filename*=UTF-8''{filename}"})
 

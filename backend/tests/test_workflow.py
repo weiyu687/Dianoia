@@ -250,9 +250,11 @@ class WorkflowTest(unittest.TestCase):
                                               "class_code": "DB101-01"}).raise_for_status().json()
         blank_route = f"/api/exams/{blank['id']}"
         blank_doc = Document(BytesIO(client.get(f"{blank_route}/document").raise_for_status().content))
-        self.assertIn("计算机一班", blank_doc.tables[0].cell(1, 1).text)
-        self.assertEqual(blank_doc.tables[1].cell(3, 0).text, "阅卷人")
+        self.assertIn("计算机一班", blank_doc.tables[0].cell(2, 3).text)
+        self.assertEqual(blank_doc.tables[1].cell(1, 0).text, "得　分")
+        self.assertEqual(blank_doc.tables[2].cell(1, 0).text, "评分人")
         self.assertEqual(blank_doc.paragraphs[-1].text, "")
+        self.assertFalse(client.get(f"{blank_route}/sheet").raise_for_status().json()["can_build"])
         self.assertEqual(client.post("/api/exams", json={"course_id": course, "title": "非法班级",
                                                        "class_code": "unrelated"}).status_code, 422)
         table_only = Document()
@@ -322,7 +324,68 @@ class WorkflowTest(unittest.TestCase):
         client.patch(route, json={"title": "更新后的试卷"}).raise_for_status()
         self.assertTrue(client.get(f"{route}/answers").raise_for_status().json()["stale"])
         self.assertEqual(client.get(f"{route}/export/answers/docx").raise_for_status().content, edited.getvalue())
+        self.check_answer_sheet(client, course)
         return row["id"]
+
+    def check_answer_sheet(self, client, course):
+        from app.exam_tex import text as latex_text
+
+        payload = {"course_id": course, "title": "作答区验收", "class_code": "DB101-01",
+                   "groups": [{"kind": kind, "count": 1, "points": 5} for kind in ("single", "blank", "written")]}
+        questions = [
+            {"kind": "single", "stem": "比较数值", "options": ["甲", "乙", "丙"], "answer": "B", "points": 5},
+            {"kind": "blank", "stem": "填写 ____ 与 ____", "answer": "教师答案填空", "points": 5},
+            {"kind": "written", "stem": r"计算 $\frac{1}{2}$，输出结果", "answer": "教师答案主观题",
+             "points": 5, "tags": ["编程"]},
+        ]
+        with patch("app.exams.generate", return_value=json.dumps({"questions": questions})):
+            row = client.post("/api/exams/generate", json=payload).raise_for_status().json()
+        path = f"/api/exams/{row['id']}"
+        state = client.get(f"{path}/sheet").raise_for_status().json()
+        self.assertTrue(state["can_build"])
+        self.assertEqual(state["questions"][0]["option_count"], 3)
+        self.assertEqual(state["questions"][1]["area"]["blanks"], 2)
+        areas = {q["id"]: q["area"] for q in state["questions"]}
+        areas[state["questions"][2]["id"]].update(lines=8, line_mm=10, width_mm=120)
+        body = {"revision": state["revision"], "areas": areas}
+        generated = client.put(f"{path}/sheet", json=body).raise_for_status().json()
+        sheet = client.get(f"{path}/export/sheet/docx").raise_for_status().content
+        doc = Document(BytesIO(sheet))
+        self.assertEqual([c.text for c in doc.tables[1].rows[0].cells], ["1.", "［A］", "［B］", "［C］"])
+        self.assertAlmostEqual(doc.tables[-1].rows[0].height.mm, 80, delta=0.1)
+        self.assertNotIn("教师答案", "".join(p.text for p in doc.paragraphs))
+        tex = client.get(f"{path}/export/paper/tex").raise_for_status().content.decode()
+        self.assertIn(r"\(\frac{1}{2}\)", tex)
+        self.assertIn(r"\textbackslash{}input\{example\}", latex_text(r"$\input{example}$"))
+        self.assertNotIn("教师答案", tex)
+        tex_sheet = client.get(f"{path}/export/sheet/tex").raise_for_status().content.decode()
+        self.assertIn("80mm", tex_sheet)
+        self.assertNotIn("教师答案", tex_sheet)
+        self.assertIn("教师答案主观题", client.get(f"{path}/export/answers/tex").raise_for_status().content.decode())
+        doc.add_paragraph("补充作答须知")
+        changed = BytesIO()
+        doc.save(changed)
+        body["revision"] = generated["revision"]
+        saved = client.put(f"{path}/sheet/document", data={"revision": generated["revision"]}, files={
+            "file": ("sheet.docx", changed.getvalue()),
+        }).raise_for_status().json()
+        self.assertTrue(saved["edited"])
+        self.assertFalse(saved["stale"])
+        self.assertEqual(client.get(f"{path}/export/sheet/docx").raise_for_status().content, changed.getvalue())
+        body["revision"] = saved["revision"]
+        self.assertEqual(client.put(f"{path}/sheet", json=body).status_code, 409)
+        copy = client.post(f"{path}/copy").raise_for_status().json()
+        copied = client.get(f"/api/exams/{copy['id']}/export/sheet/docx").raise_for_status().content
+        self.assertEqual(copied, changed.getvalue())
+        client.patch(path, json={"title": "卷头已调整"}).raise_for_status()
+        self.assertTrue(client.get(f"{path}/sheet").raise_for_status().json()["stale"])
+        self.assertEqual(client.get(f"{path}/export/sheet/tex").status_code, 409)
+        latest = client.get(f"{path}/sheet").raise_for_status().json()
+        rebuilt = client.put(f"{path}/sheet", json=body | {
+            "revision": latest["revision"], "replace_edits": True,
+        }).raise_for_status().json()
+        self.assertFalse(rebuilt["edited"])
+        self.assertFalse(rebuilt["stale"])
 
     def check_lesson_templates(self, client, course, legacy_route):
         templates = "/api/lesson-templates"

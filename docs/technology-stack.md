@@ -51,9 +51,9 @@
 
 2026-11-13 确认复用 Vue 3 的 DOCX Editor 2.37.0、python-docx 和 LibreOffice Writer。Word 文件以 DOCX 为在线编辑格式，DOC 导入和导出经过 LibreOffice。试卷正文及题目元数据分别保存。优先按 Word 段落和编号提出题目范围，教师确认后用 Word 书签标识题目。单题修改仅写入确认的范围，参考答案单独保存。试卷题型按作答方式建模，专业细分采用标签。生成和单题修改复用现有 Chat Completions 接口。Windows Chrome 已验证书签定位、手动选区标记、DOCX 重开、PDF 预览和旧版 DOC 导出。[DOCX Editor 书签](https://www.docx-editor.dev/docs/2.x/guides/bookmarks) · [LibreOffice 转换格式](https://help.libreoffice.org/latest/en-US/text/shared/guide/convertfilters.html) · [ACL 2025 选择题研究](https://aclanthology.org/2025.findings-acl.432/) · [EMNLP 2026 干扰项研究](https://aclanthology.org/2026.findings-emnlp.2382/)
 
-## 待验证和待选型
+2026-11-14 确认继续使用 DOCX Editor、python-docx 和 LibreOffice。答题卡由已确认的题目按题型生成，单独保存区域设置和 DOCX，支持分页预览、在线编辑与 Word 导出。LaTeX 使用 XeLaTeX 和 `ctexart` 从结构化题目和答题卡设置排版，分别提供 `.tex` 和编译后的 PDF。验收使用 TeX Live 2024、XeTeX 0.999996、CTeX 2.5.10，部署依赖见 README。已编译验证三类文档的中文、公式、页码和作答区域。[CTAN ctex](https://ctan.org/pkg/ctex)
 
-- 答题卡拟延用 DOCX Editor、python-docx 和 LibreOffice，使 Word 版可调整行高和边框。LaTeX 另评估 XeLaTeX 与 `ctexart` 或 `exam-zh` 的中文排版、公式及答题区。TeX Live 2024 已通过本地最小样例编译，包含中文、分式、横线和作答框。产品接入和正式模板待确认。[CTAN exam-zh](https://ctan.org/tex-archive/macros/xetex/latex/exam-zh)
+## 待验证和待选型
 
 - 资料向量检索的候选为 PostgreSQL + pgvector 与 Qwen3-Embedding。以真实中文课程样本比较证据召回、章节切分与引用页码后再确认。
 - 对话持久化、Agent 修改教案、耗时任务队列、数据库迁移、对象存储及生产部署需要单独验收。

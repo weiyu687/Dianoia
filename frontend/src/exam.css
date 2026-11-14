@@ -11,6 +11,16 @@
 .exam-comparison { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 .exam-comparison > div { padding: 10px; border: 1px solid var(--line); border-radius: 8px; }
 .exam-comparison pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.sheet-layout-group { min-width: 0; margin: 0; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
+.sheet-layout-group legend { padding: 0 6px; font-weight: 600; }
+.sheet-layout-row { padding: 9px 0; }
+.sheet-layout-row + .sheet-layout-row { border-top: 1px solid var(--line); }
+.sheet-question { display: flex; gap: 8px; overflow-wrap: anywhere; }
+.sheet-area-fields { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
+.sheet-area-fields label { display: grid; gap: 5px; font-size: 13px; }
+.sheet-area-fields input { width: 8.5em; }
+.exam-export-options + .exam-export-options { padding-top: 12px; border-top: 1px solid var(--line); }
+.exam-export-options .actions { justify-content: flex-start; }
 @media (max-width: 820px) {
   .exam-workspace, .exam-comparison { grid-template-columns: minmax(0, 1fr); }
   .exam-question-list { max-height: 185px; }
