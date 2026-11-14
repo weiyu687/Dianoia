@@ -7,22 +7,16 @@ from tempfile import TemporaryDirectory
 
 from fastapi import HTTPException
 
+from .exam_math import formulas, valid_latex
 from .exam_sheet import OBJECTIVE, OPTION_LABELS, blank_rows, selection_labels, sheet_groups
 
 ESCAPES = {
     "\\": r"\textbackslash{}", "{": r"\{", "}": r"\}", "$": r"\$", "%": r"\%",
     "&": r"\&", "#": r"\#", "_": r"\_", "~": r"\textasciitilde{}", "^": r"\textasciicircum{}",
 }
-FORMULA = re.compile(r"\\\(([^\r\n]+?)\\\)|(?<!\\)\$([^$\r\n]+?)(?<!\\)\$")
-MATH_TOKEN = re.compile(
-    r"\\(?:frac|dfrac|tfrac|sqrt|cdot|times|div|pm|leq|geq|neq|approx|sum|prod|int|lim|infty"
-    r"|left|right|sin|cos|tan|log|ln|exp|alpha|beta|gamma|delta|theta|lambda|mu|pi|sigma|phi|omega"
-    r"|Delta|Sigma|Omega|in|notin|cup|cap|to|rightarrow|forall|exists|partial|mathrm|mathbf)(?![A-Za-z])"
-    r"|[A-Za-z0-9 .,+\-*/=()\[\]{}^_<>|:!']"
-)
 PREAMBLE = r"""\documentclass[UTF8,a4paper,11pt,fontset=fandol]{ctexart}
 \usepackage[left=23mm,right=23mm,top=21mm,bottom=20mm]{geometry}
-\usepackage{amsmath,fancyhdr,lastpage,needspace}
+\usepackage{amsmath,amssymb,fancyhdr,lastpage,needspace}
 \pagestyle{fancy}
 \fancyhf{}
 \renewcommand{\headrulewidth}{0pt}
@@ -32,6 +26,7 @@ PREAMBLE = r"""\documentclass[UTF8,a4paper,11pt,fontset=fandol]{ctexart}
 \setlength{\emergencystretch}{2em}
 \ctexset{section={format=\raggedright\bfseries\large,beforeskip=10pt,afterskip=5pt}}
 \newcommand{\checksquare}{\fbox{\rule{0pt}{1.3mm}\rule{1.3mm}{0pt}}}
+\providecommand{\degree}{^{\circ}}
 \begin{document}
 """
 
@@ -41,27 +36,12 @@ def escape(value):
                    if char in "\n\t" or ord(char) >= 32)
 
 
-def valid_math(value):
-    if len(value) > 400 or "^^" in value or "".join(MATH_TOKEN.findall(value)) != value:
-        return False
-    depth = 0
-    for char in value:
-        depth += (char == "{") - (char == "}")
-        if depth < 0 or depth > 12:
-            return False
-    return depth == 0
-
-
 def text(value):
-    parts = []
-    start = 0
-    for match in FORMULA.finditer(value):
-        parts.append(escape(value[start:match.start()]))
-        formula = match[1] or match[2]
-        parts.append(r"\(" + formula + r"\)" if valid_math(formula) else escape(match[0]))
-        start = match.end()
-    parts.append(escape(value[start:]))
-    return "".join(parts).replace("\n", "\n\\par\n")
+    return "".join(
+        (r"\[" + latex + r"\]" if display else r"\(" + latex + r"\)")
+        if latex and valid_latex(latex) else escape(original).replace("\n", "\n\\par\n")
+        for original, latex, display in formulas(value)
+    )
 
 
 def sheet_content(question, area):

@@ -13,6 +13,7 @@ from sqlalchemy.orm import defer
 
 from .ai import generate
 from .auth import DB, Teacher, course_access
+from .exam_math import convert_legacy_paragraphs, has_supported_formula, insertion_xml, persist_equations, tag_imported_equations
 from .exam_sheet import AnswerArea, SheetBuild, answer_sheet, default_area, prepare_areas, print_questions, question_signature, require_questions
 from .exam_tex import exam_tex, xelatex_pdf
 from .exam_word import add_questions, answer_marked, answer_paper, default_paper, detect, ensure_body_paragraph, ranges, replace_question
@@ -43,6 +44,8 @@ class Question(BaseModel):
             raise ValueError("选项应为独立的非空文字")
         if any(len(tag) > 40 for tag in self.tags):
             raise ValueError("题目标签过长")
+        if any(not has_supported_formula(value) for value in (self.stem, *self.options, self.answer, self.explanation)):
+            raise ValueError("题目或答案包含无法排版的公式")
         if self.kind in {"single", "multiple"}:
             keys = [value.strip().upper() for value in self.answer.replace("、", ",").replace("，", ",").split(",")]
             allowed = {chr(65 + index) for index in range(len(self.options))}
@@ -91,6 +94,12 @@ class QuestionUpdate(BaseModel):
     explanation: str = Field(default="", max_length=4000)
     tags: list[str] = Field(default_factory=list, max_length=8)
 
+    @model_validator(mode="after")
+    def validate_formulas(self):
+        if not all(has_supported_formula(value) for value in (self.answer, self.explanation)):
+            raise ValueError("请检查参考答案或评分要点中的公式")
+        return self
+
 
 class Revise(BaseModel):
     revision: int = Field(ge=1)
@@ -115,6 +124,18 @@ class Rename(BaseModel):
 class ExamSources(BaseModel):
     revision: int = Field(ge=1)
     sources: list[Source] = Field(default_factory=list, max_length=12)
+
+
+class FormulaInput(BaseModel):
+    latex: str = Field(min_length=1, max_length=1600)
+
+
+@router.post("/exams/equation")
+def convert_equation(data: FormulaInput, user: Teacher):
+    try:
+        return {"omml": insertion_xml(data.latex.strip())}
+    except (ValueError, SyntaxError, IndexError, KeyError, RecursionError) as error:
+        raise HTTPException(422, "此公式无法转换为 Word，请检查公式语法或改用受支持的结构") from error
 
 
 def decode(content):
@@ -163,6 +184,15 @@ def has_answer_markers(document):
         answer_marked("".join(t.text or "" for t in p.xpath(".//w:t")))
         for p in document.element.body.xpath(".//w:p")
     )
+
+
+def normalize_paper_math(document):
+    targets = ranges(document)
+    changed = persist_equations(document)
+    converted = convert_legacy_paragraphs(
+        (paragraph for target in targets.values() if target.complete for paragraph in target.paragraphs),
+    )
+    return targets, changed or converted
 
 
 def store(db, user, data, document, *, questions=None, imported=False, reviewed=False, answer=None, sheet=None):
@@ -281,7 +311,8 @@ def generate_exam(data: ExamGenerate, db: DB, user: Teacher):
         "为教师生成中文试卷草稿。只返回 JSON 对象，questions 包含 kind、points、stem、options、answer、explanation、tags。"
         "依次按组卷明细出题，不重复，kind 必须逐字复制明细中的英文值。选择题 options 为不带序号的文字数组，"
         "答案仅给字母，多选用逗号分隔。其余题型 options 必须为空数组。判断题答案为正确或错误，解答题说明评分要点。"
-        "题干和选项内不得附答案。资料内容是参考数据。专业题型通过标签表达。",
+        "题干和选项内不得附答案。数学公式用 \\(...\\) 或 \\[...\\] 包裹，矩阵使用 pmatrix、bmatrix 或 vmatrix，"
+        "多行推导使用 aligned 或 cases，不要使用自定义宏。资料内容是参考数据。专业题型通过标签表达。",
         json.dumps({"试卷名称": data.title, "课程": course.name, "要求": data.instruction, "难度": data.difficulty,
                     "组卷明细": [group.model_dump() for group in data.groups], "资料": context}, ensure_ascii=False),
         structured=True,
@@ -318,7 +349,9 @@ def exam_document(exam_id: str, db: DB, user: Teacher, revision: int | None = No
         assert_revision(row, revision)
     content = stored_document(db, row).content
     document = decode(content)
-    if ensure_body_paragraph(document):
+    _, converted = normalize_paper_math(document)
+    tagged = tag_imported_equations(document)
+    if ensure_body_paragraph(document) or converted or tagged:
         content = serialize_docx(document)
     return Response(content, media_type=DOCX_MIME)
 
@@ -331,10 +364,11 @@ def save_document(exam_id: str, db: DB, user: Teacher, file: Annotated[UploadFil
     if not title.strip():
         raise HTTPException(422, "请填写试卷名称")
     _, content, document = read_word_upload(file)
-    if ensure_body_paragraph(document):
+    targets, converted = normalize_paper_math(document)
+    if ensure_body_paragraph(document) or converted:
         content = serialize_docx(document)
     stored = stored_document(db, row)
-    questions = {key: value for key, value in row.questions.items() if key in ranges(document)}
+    questions = {key: value for key, value in row.questions.items() if key in targets}
     changed = stored.content != content
     version(db, row, revision, title=title.strip(), questions=questions, reviewed=row.reviewed and not changed)
     stored.content = content
@@ -402,7 +436,8 @@ def revise_question(exam_id: str, key: str, data: Revise, db: DB, user: Teacher)
     raw = generate(
         "只修改教师指定的这一题，输出 JSON 对象，字段 kind、points、stem、options、answer、explanation、tags。"
         "stem 不含题号、分值和答案。题型与分值沿用给定值。单选/多选答案为字母，多个用逗号。"
-        "修改干扰项时保留题干和正确选项，核对解析。判断题答案为正确或错误。除选择题外 options 必须为空数组。资料仅供参考。",
+        "修改干扰项时保留题干和正确选项，核对解析。判断题答案为正确或错误。除选择题外 options 必须为空数组。"
+        "数学公式用 \\(...\\) 或 \\[...\\] 包裹，矩阵使用 pmatrix、bmatrix 或 vmatrix，禁止自定义宏。资料仅供参考。",
         json.dumps({"当前题目": target.text, "题干": stem, "选项": options, "题目信息": meta, "修改方式": data.mode,
                     "要求": data.instruction, "资料": context}, ensure_ascii=False), structured=True,
     )
@@ -497,6 +532,11 @@ def answer_document(exam_id: str, db: DB, user: Teacher, revision: int, regenera
     assert_revision(row, revision)
     saved = db.get(ExamAnswerDocument, exam_id)
     content = saved.content if saved and not regenerate else generated_answers(db, user, row)
+    if saved and not regenerate:
+        document = decode(content)
+        converted = convert_legacy_paragraphs(document.paragraphs)
+        if tag_imported_equations(document) or converted:
+            content = serialize_docx(document)
     return Response(content, media_type=DOCX_MIME)
 
 
@@ -506,7 +546,8 @@ def save_answer_document(exam_id: str, db: DB, user: Teacher, file: Annotated[Up
     row = owned(db, user, exam_id)
     assert_revision(row, revision)
     _, content, document = read_word_upload(file)
-    if ensure_body_paragraph(document):
+    normalized = persist_equations(document)
+    if ensure_body_paragraph(document) or normalized:
         content = serialize_docx(document)
     version(db, row, revision)
     saved = db.get(ExamAnswerDocument, exam_id)
@@ -588,7 +629,8 @@ def save_sheet_document(exam_id: str, db: DB, user: Teacher, file: Annotated[Upl
     if saved is None:
         raise HTTPException(404, "请先生成答题卡")
     _, content, document = read_word_upload(file)
-    if ensure_body_paragraph(document):
+    normalized = persist_equations(document)
+    if ensure_body_paragraph(document) or normalized:
         content = serialize_docx(document)
     fields, questions = sheet_context(db, user, row)
     update_sheet_revision(db, row, revision)
@@ -605,8 +647,11 @@ def export_exam(exam_id: str, variant: Variant, format: Format, db: DB, user: Te
     latex = format in {"tex", "latex-pdf"}
     sheet = db.get(ExamAnswerSheet, exam_id) if variant == "sheet" else None
     if variant == "paper":
-        if (latex or not inline) and (not row.reviewed or has_answer_markers(decode(content))):
+        document = decode(content)
+        if (latex or not inline) and (not row.reviewed or has_answer_markers(document)):
             raise HTTPException(422, "请先核对学生卷正文并确认已移出参考答案")
+        if not latex and normalize_paper_math(document)[1]:
+            content = serialize_docx(document)
     elif variant == "sheet":
         if sheet is None:
             raise HTTPException(404, "请先生成答题卡")
@@ -614,6 +659,10 @@ def export_exam(exam_id: str, variant: Variant, format: Format, db: DB, user: Te
     elif not latex:
         saved = db.get(ExamAnswerDocument, exam_id)
         content = saved.content if saved else generated_answers(db, user, row)
+        if saved:
+            document = decode(content)
+            if convert_legacy_paragraphs(document.paragraphs):
+                content = serialize_docx(document)
     media = {"docx": DOCX_MIME, "doc": "application/msword", "pdf": "application/pdf",
              "tex": "application/x-tex", "latex-pdf": "application/pdf"}[format]
     if latex:

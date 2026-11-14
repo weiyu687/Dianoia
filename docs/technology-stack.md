@@ -53,6 +53,8 @@
 
 2026-11-14 确认继续使用 DOCX Editor、python-docx 和 LibreOffice。答题卡由已确认的题目按题型生成，单独保存区域设置和 DOCX，支持分页预览、在线编辑与 Word 导出。LaTeX 使用 XeLaTeX 和 `ctexart` 从结构化题目和答题卡设置排版，分别提供 `.tex` 和编译后的 PDF。验收使用 TeX Live 2024、XeTeX 0.999996、CTeX 2.5.10，部署依赖见 README。已编译验证三类文档的中文、公式、页码和作答区域。[CTAN ctex](https://ctan.org/pkg/ctex)
 
+试卷公式编辑采用 MathLive 0.111.4 提供可视输入和数学键盘，沿用 KaTeX 0.16.47 提供实时预览。MathLive 按需加载，字体随前端提供。后端使用 latex2mathml 3.81.1 和受支持的 MathML 到 OMML 映射生成 Word 原生公式，omml2latex 0.1.1 用于读取可识别的导入公式。现有 DOCX Editor 2.37.0 通过 Flat OPC 写入公式，网页画布的公式以 KaTeX 字形排版，普通 PDF 由 LibreOffice 生成。已验证 Chrome 保存重开后的矩阵编辑、分式录入和答案预览，以及高数和线代样卷的 LibreOffice 与 XeLaTeX 导出。[MathLive 数学键盘](https://mathlive.io/mathfield/guides/virtual-keyboard/) · [Microsoft Office Math](https://learn.microsoft.com/en-us/office/math/) · [NIST 关于 LaTeX 与 MathML 表示的研究](https://tsapps.nist.gov/publication/get_pdf.cfm?pub_id=925433)
+
 ## 待验证和待选型
 
 - 资料向量检索的候选为 PostgreSQL + pgvector 与 Qwen3-Embedding。以真实中文课程样本比较证据召回、章节切分与引用页码后再确认。

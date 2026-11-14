@@ -21,6 +21,22 @@
 .sheet-area-fields input { width: 8.5em; }
 .exam-export-options + .exam-export-options { padding-top: 12px; border-top: 1px solid var(--line); }
 .exam-export-options .actions { justify-content: flex-start; }
+.exam-formula-tool { display: inline-flex; align-items: center; gap: 5px; min-height: 30px; padding: 3px 8px; border: 0; background: transparent; color: inherit; }
+.formula-editor > .segmented, .formula-keyboard-toggle { width: fit-content; }
+.formula-templates { display: flex; flex-wrap: wrap; gap: 4px; }
+.formula-templates button { min-height: 32px; padding: 3px 8px; }
+.formula-mathfield math-field { display: block; width: 100%; min-height: 76px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: inherit; font-size: 24px; }
+.formula-mathfield math-field::part(virtual-keyboard-toggle) { display: none; }
+.formula-keyboard { position: relative; isolation: isolate; }
+.formula-keyboard .ML__keyboard { position: relative !important; transform: none !important; }
+.formula-keyboard .ML__keyboard.is-visible { height: var(--_keyboard-height); }
+.formula-source { font-family: Consolas, monospace; }
+.formula-preview { min-height: 35px; padding: 8px 12px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.formula-preview .katex-display { margin: 0.3em 0; }
+.math-preview { white-space: pre-wrap; }
+.math-preview .katex { white-space: normal; }
+.math-invalid { text-decoration: underline wavy; }
+.word-math-vector { display: inline-flex; align-items: center; justify-content: center; width: 100%; height: 100%; padding: 0; border: 0; background: transparent; color: inherit; cursor: pointer; font-size: inherit; overflow: visible; }
 @media (max-width: 820px) {
   .exam-workspace, .exam-comparison { grid-template-columns: minmax(0, 1fr); }
   .exam-question-list { max-height: 185px; }

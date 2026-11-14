@@ -7,11 +7,20 @@ import { defineConfig } from 'vite'
 const proxy = { '/api': 'http://127.0.0.1:8000' }
 const pdfAssets = fileURLToPath(new URL('./node_modules/pdfjs-dist/', import.meta.url))
 const pdfFolders = ['cmaps', 'standard_fonts']
+const mathFonts = fileURLToPath(new URL('./node_modules/mathlive/fonts/', import.meta.url))
 
 export default defineConfig({
   plugins: [vue(), {
-    name: 'dianoia-pdf-fonts',
+    name: 'dianoia-document-assets',
     configureServer(server) {
+      server.middlewares.use('/mathlive-fonts', (request, response, next) => {
+        const match = /^\/([\w-]+\.woff2)$/.exec(request.url || '')
+        if (!match) return next()
+        const filename = resolve(mathFonts, match[1])
+        if (!existsSync(filename)) return next()
+        response.setHeader('Content-Type', 'font/woff2')
+        createReadStream(filename).pipe(response)
+      })
       server.middlewares.use('/pdfjs', (request, response, next) => {
         const match = /^\/(cmaps|standard_fonts)\/([\w-][\w.-]+)$/.exec(request.url || '')
         if (!match) return next()
@@ -22,6 +31,7 @@ export default defineConfig({
       })
     },
     writeBundle(options) {
+      cpSync(mathFonts, resolve(options.dir, 'mathlive-fonts'), { recursive: true })
       const target = resolve(options.dir, 'pdfjs')
       mkdirSync(target, { recursive: true })
       for (const folder of pdfFolders) cpSync(resolve(pdfAssets, folder), resolve(target, folder), { recursive: true })

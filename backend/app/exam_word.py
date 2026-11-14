@@ -11,6 +11,7 @@ from docx.shared import Mm, Pt, RGBColor
 from docx.text.paragraph import Paragraph
 from fastapi import HTTPException
 
+from .exam_math import append_math_text, authored_equation, paragraph_text
 from .lessons import chinese_lesson_document, set_chinese_typeface
 from .models import identifier
 
@@ -40,10 +41,11 @@ def answer_marked(text):
 
 
 def unsafe(paragraph):
-    return any(child.tag not in {qn("w:pPr"), qn("w:r"), qn("w:bookmarkStart"), qn("w:bookmarkEnd")}
+    allowed = {qn("w:pPr"), qn("w:r"), qn("w:bookmarkStart"), qn("w:bookmarkEnd"), qn("m:oMath")}
+    return any(child.tag not in allowed or (child.tag == qn("m:oMath") and not authored_equation(child))
                for child in paragraph._p) or bool(paragraph._p.xpath(
         ".//w:drawing | .//w:pict | .//w:object | .//w:fldChar | .//w:instrText | "
-        ".//w:hyperlink | .//w:sdt | .//w:ins | .//w:del | .//m:oMath | .//w:br[@w:type] | "
+        ".//w:hyperlink | .//w:sdt | .//w:ins | .//w:del | .//m:oMathPara | .//w:br[@w:type] | "
         "./w:pPr/w:sectPr"
     ))
 
@@ -56,7 +58,7 @@ class QuestionRange:
 
     @property
     def text(self):
-        return "\n".join(p.text for p in self.paragraphs).strip()
+        return "\n".join(paragraph_text(p) for p in self.paragraphs).strip()
 
     @property
     def replaceable(self):
@@ -64,7 +66,7 @@ class QuestionRange:
 
     @property
     def parts(self):
-        lines = self.text.splitlines()
+        lines = [line for p in self.paragraphs for line in paragraph_text(p).splitlines()]
         stem, options = [], []
         for i, line in enumerate(lines):
             match = OPTION.match(line)
@@ -154,7 +156,7 @@ def detect(document):
             current.clear()
 
         for paragraph in paragraphs:
-            text = paragraph.text.strip()
+            text = paragraph_text(paragraph).strip()
             if ANSWERS.match(text):
                 record()
                 return kind, True
@@ -345,15 +347,16 @@ def answer_paper(title, course, teacher, questions, *, school="", term="", class
                 continue
             first = question["text"].splitlines()
             text = first[0] if first else "未填写题干"
-            document.add_paragraph(text if PREFIX.match(text) else f"{index}. {text}")
+            paragraph = document.add_paragraph()
+            append_math_text(paragraph, text if PREFIX.match(text) else f"{index}. {text}")
             if not objective:
                 paragraph = document.add_paragraph()
                 paragraph.add_run("参考答案　").bold = True
-                paragraph.add_run(question["answer"] or "待补充").font.color.rgb = RGBColor.from_string("204D86")
+                append_math_text(paragraph, question["answer"] or "待补充", color=RGBColor.from_string("204D86"))
             if question["explanation"]:
                 paragraph = document.add_paragraph()
                 paragraph.add_run("解析与评分要点　").bold = True
-                paragraph.add_run(question["explanation"])
+                append_math_text(paragraph, question["explanation"])
     ensure_body_paragraph(document)
     return document
 
@@ -385,11 +388,13 @@ def add_questions(document, questions, *, use_template=False):
                 exam_section(document, f"{SECTION_NUMBERS[len(counts)]}、{TYPES[kind]}（共{count}题，共{points}分）", scoring=True)
             counts[kind] = 0
         counts[kind] += 1
-        paragraphs = [document.add_paragraph(f"{counts[kind]}. {question.stem}（{question.points}分）")]
+        paragraphs = [document.add_paragraph()]
+        append_math_text(paragraphs[0], f"{counts[kind]}. {question.stem}（{question.points}分）")
         if anchor is None:
             paragraphs[0].paragraph_format.space_after = Pt(4)
         for i, option in enumerate(question.options):
-            paragraph = document.add_paragraph(f"{chr(65 + i)}. {option}")
+            paragraph = document.add_paragraph()
+            append_math_text(paragraph, f"{chr(65 + i)}. {option}")
             if anchor is None:
                 paragraph.paragraph_format.left_indent = Mm(5)
                 paragraph.paragraph_format.space_after = Pt(2)
@@ -434,8 +439,9 @@ def replace_question(target, question, previous_points=None):
         original = target.paragraphs[min(i, len(target.paragraphs) - 1)]
         if i < len(target.paragraphs):
             paragraph = target.paragraphs[i]
-            for run in paragraph.runs:
-                run._r.getparent().remove(run._r)
+            for child in list(paragraph._p):
+                if child.tag in {qn("w:r"), qn("m:oMath")}:
+                    paragraph._p.remove(child)
         else:
             new = OxmlElement("w:p")
             last._p.addnext(new)
@@ -444,10 +450,8 @@ def replace_question(target, question, previous_points=None):
                 new.append(deepcopy(original._p.pPr))
                 if new.pPr.numPr is not None:
                     new.pPr.remove(new.pPr.numPr)
-        run = paragraph.add_run(text)
         style = properties[min(i, len(properties) - 1)]
-        if style is not None:
-            run._r.insert(0, deepcopy(style))
+        append_math_text(paragraph, text, (lambda: deepcopy(style)) if style is not None else None)
         last = paragraph
     for paragraph in remaining[len(texts) - 1:]:
         paragraph._p.getparent().remove(paragraph._p)

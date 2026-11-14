@@ -1,21 +1,26 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import {
-  DocxEditorContent, DocxEditorContentControl, DocxEditorContextMenu, DocxEditorEquation, DocxEditorHyperLink,
-  DocxEditorLoading, DocxEditorOpenFailure, DocxEditorRoot, DocxEditorToolbar, DocxEditorViewport, LocaleProvider,
+  DocxEditorContent, DocxEditorContentControl, DocxEditorContextMenu, DocxEditorHyperLink,
+  DocxEditorLoading, DocxEditorOpenFailure, DocxEditorRoot, DocxEditorToolbar, DocxEditorUnsupportedElement,
+  DocxEditorViewport, LocaleProvider,
 } from '@docx-editor.dev/vue'
 import { zhCN } from '@docx-editor.dev/i18n'
+import { createBrowserAutomationHost } from '@docx-editor.dev/core/editor'
 import { setHarfBuzzWasmUrl } from '@docx-editor.dev/core/layout'
 import harfBuzzWasm from '@docx-editor.dev/core/harfbuzz.wasm?url'
 import '@docx-editor.dev/vue/styles.css'
-import { ArrowLeft, BookmarkPlus, Download, Eye, Save, Sparkles } from 'lucide-vue-next'
+import { ArrowLeft, BookmarkPlus, Download, Eye, Save, Sparkles, Sigma } from 'lucide-vue-next'
 import { onBeforeRouteLeave, useRoute } from 'vue-router'
 import { api, download } from '../api'
 import AnswerSheetLayout from '../components/AnswerSheetLayout.vue'
+import FormulaEditor from '../components/FormulaEditor.vue'
+import MathPreview from '../components/MathPreview.vue'
 import Modal from '../components/Modal.vue'
 import MapSources from '../components/MapSources.vue'
 import PdfViewer from '../components/PdfViewer.vue'
 import { examKinds } from '../examKinds'
+import { equationMarkup, equationPackage, mathSegments, MATH_NS } from '../examMath'
 import { theme } from '../session'
 import '../exam.css'
 
@@ -35,6 +40,10 @@ const error = ref('')
 const formError = ref('')
 const modal = ref('')
 const meta = ref(null)
+const formula = shallowRef(null)
+const answerInput = ref(null)
+const explanationInput = ref(null)
+const equationSources = new Map()
 const instruction = ref('')
 const mode = ref('replace')
 const candidate = ref(null)
@@ -56,6 +65,7 @@ const documentLabels = { paper: '试卷', answers: '参考答案', sheet: '答�
 const formats = { docx: 'Word (.docx)', doc: 'Word (.doc)', pdf: 'PDF', tex: 'LaTeX 源文件', 'latex-pdf': 'LaTeX PDF' }
 const canPreview = computed(() => editing.value !== 'sheet' || sheetState.value?.saved)
 let selectionUnsubscribe
+let equationUnsubscribe
 let changes = 0
 let pendingExport = false
 
@@ -75,6 +85,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   selectionUnsubscribe?.()
+  equationUnsubscribe?.()
   window.removeEventListener('beforeunload', beforeUnload)
 })
 
@@ -112,7 +123,189 @@ function editorReady(instance) {
   editor.value = instance
   selectionUnsubscribe?.()
   selectionUnsubscribe = instance.on('selectionChange', () => updateSelection())
+  equationUnsubscribe?.()
+  equationUnsubscribe = instance.setEquationChrome({
+    onPopover: ({ equation }) => openWordFormula(equation),
+  })
   updateSelection()
+}
+
+function isEquation(element) {
+  return element.namespaceUri === MATH_NS && element.localName === 'oMath' && !!equationMarkup(element.source)
+}
+
+function openWordFormula(equation = null, source = '') {
+  const instance = editor.value
+  if (!instance || !ready.value || !instance.snapshot().editable || !!preview.value) return
+  const surface = instance.surface
+  if (!surface) return
+  const selection = surface.state().selection
+  if (equation) {
+    const point = (offset) => ({ paragraphId: equation.paragraphId, offset })
+    formula.value = { selection: { anchor: point(equation.start), head: point(equation.end) },
+      word: true, replace: true, source: source || equationSources.get(equation.id) || simpleEquationSource(equation.linear) }
+  } else {
+    const text = instance.query({ type: 'selectedText' })?.trim() || ''
+    const parts = mathSegments(text)
+    formula.value = { selection, word: true, replace: false,
+      source: parts.length === 1 && parts[0].math ? parts[0].text : '' }
+  }
+  formError.value = ''
+  modal.value = 'formula'
+}
+
+function simpleEquationSource(linear) {
+  return linear && /^[\p{L}\p{N}+\-=., ()/^_*]+$/u.test(linear) ? linear : ''
+}
+
+function rememberEquation(element) {
+  const latex = equationMarkup(element.source)
+  equationSources.set(element.nodeId, latex)
+  return '\\(' + latex + '\\)'
+}
+
+function sizeEquation(element) {
+  if (!element) return
+  requestAnimationFrame(() => {
+    const atom = element.closest('[data-docx-equation]')
+    const visual = element.querySelector('.katex-html .base')
+    if (!atom || !visual) return
+    const observer = new ResizeObserver(() => {
+      const bases = [...element.querySelectorAll('.katex-html .base')]
+      const width = Math.ceil(bases.reduce((total, base) => total + base.offsetWidth, 0)) + 3
+      const height = Math.max(...bases.map((base) => {
+        const vertical = [...base.querySelectorAll('.vlist')].reduce((maximum, item) => Math.max(maximum, item.offsetHeight), 0)
+        return Math.max(base.offsetHeight, vertical * 1.8)
+      })) + 3
+      const fallback = element.parentElement
+      const line = atom.closest('.docx-line')
+      const lineHeight = line?.offsetHeight || 0
+      atom.style.width = width + 'px'
+      atom.style.height = height + 'px'
+      if (fallback) Object.assign(fallback.style, { width: width + 'px', height: height + 'px', overflow: 'visible' })
+      if (height > lineHeight) atom.style.verticalAlign = 'middle'
+    })
+    observer.observe(visual)
+    formulaObservers.get(element)?.disconnect()
+    formulaObservers.set(element, observer)
+  })
+}
+
+const formulaObservers = new Map()
+const vEquationBox = {
+  mounted: sizeEquation,
+  updated: sizeEquation,
+  unmounted(element) {
+    formulaObservers.get(element)?.disconnect()
+    formulaObservers.delete(element)
+  },
+}
+
+function equationFromAtom(atom) {
+  return { id: atom.dataset.docxEquation, paragraphId: atom.dataset.paragraphId,
+    start: Number(atom.dataset.start), end: Number(atom.dataset.end) }
+}
+
+function openPreviewEquation(element, event) {
+  const atom = event.currentTarget.closest('[data-docx-equation]')
+  if (atom) openWordFormula(equationFromAtom(atom), equationMarkup(element.source))
+}
+
+function onEquationClick(event) {
+  const atom = event.target.closest?.('[data-docx-equation]')
+  if (!atom || !equationSources.has(atom.dataset.docxEquation)) return
+  event.preventDefault()
+  event.stopPropagation()
+  openWordFormula(equationFromAtom(atom))
+}
+
+function openTextFormula(key) {
+  const input = key === 'answer' ? answerInput.value : explanationInput.value
+  const { selectionStart: start, selectionEnd: end } = input
+  const value = meta.value[key]
+  let offset = 0
+  let matched
+  for (const part of mathSegments(value)) {
+    const length = (part.original || part.text).length
+    if (part.math && start >= offset && end <= offset + length) {
+      matched = { start: offset, end: offset + length, source: part.text }
+      break
+    }
+    offset += length
+  }
+  formula.value = { key, start, end, source: '', ...matched, replace: !!matched }
+  formError.value = ''
+  modal.value = 'formula'
+}
+
+function closeFormula() {
+  const target = formula.value
+  formula.value = null
+  formError.value = ''
+  modal.value = target?.word ? '' : 'metadata'
+  if (target?.word) nextTick(() => editor.value?.surface?.focus())
+}
+
+function focusFormulaField(key, offset) {
+  nextTick(() => {
+    const input = key === 'answer' ? answerInput.value : explanationInput.value
+    input?.focus()
+    input?.setSelectionRange(offset, offset)
+  })
+}
+
+function applyFormula(latex) {
+  const target = formula.value
+  run(async () => {
+    const { omml } = await api('/exams/equation', { method: 'POST', body: { latex } })
+    if (target.word) {
+      insertWordFormula(target, omml)
+    } else {
+      const value = meta.value[target.key]
+      const wrapped = latex.includes('\n') ? '\\[' + latex + '\\]' : '\\(' + latex + '\\)'
+      const updated = value.slice(0, target.start) + wrapped + value.slice(target.end)
+      if (updated.length > (target.key === 'answer' ? 3000 : 4000)) throw new Error('超过该字段的字数上限')
+      meta.value[target.key] = updated
+      closeFormula()
+      focusFormulaField(target.key, target.start + wrapped.length)
+      return
+    }
+    closeFormula()
+  }, formError)
+}
+
+function insertWordFormula(target, omml) {
+  const instance = editor.value
+  const surface = instance.surface
+  const { anchor, head } = target.selection
+  if (anchor.paragraphId !== head.paragraphId) throw new Error('请将光标放在同一段落内插入公式')
+  surface.setSelection(target.selection)
+  const name = 'dm_' + crypto.randomUUID().replaceAll('-', '')
+  const host = createBrowserAutomationHost(instance)
+  const execute = (operation) => {
+    const result = host.execute({ operations: [operation] })
+    if (!result.ok) {
+      const failure = result.results.find((item) => item.status === 'error')
+      throw new Error(failure?.error?.message || 'Word 无法在当前位置写入公式，请将光标移到普通正文后重试')
+    }
+    return result.results[0].value
+  }
+  let marked = false
+  try {
+    marked = instance.exec({ type: 'insertBookmark', name }).ok
+    if (!marked) throw new Error('当前位置不可插入公式')
+    const { handle } = execute({ op: 'getDocument' })
+    const { handle: body } = execute({ op: 'getBody', document: handle })
+    const { handles } = execute({ op: 'getBookmarks', scope: { body } })
+    const bookmark = handles.find((item) => execute({ op: 'getBookmarkName', bookmark: item }).text === name)
+    const span = bookmark && execute({ op: 'getBookmarkRange', bookmark }).span
+    if (!span) throw new Error('无法定位公式插入点，请在普通正文中重新定位光标')
+    execute({ op: 'insertOoxml', span, location: 'Replace', ooxml: equationPackage(omml) })
+    changed()
+  } finally {
+    if (marked) instance.exec({ type: 'deleteBookmark', name })
+    host.dispose()
+  }
 }
 
 function changed() {
@@ -225,6 +418,12 @@ function openRevision() {
 }
 
 function editorShortcut(event) {
+  if (!event.isComposing && event.altKey && !event.ctrlKey && event.code === 'Equal' && ready.value) {
+    event.preventDefault()
+    openWordFormula()
+    return
+  }
+  if (editing.value !== 'paper') return
   if (event.isComposing || !event.altKey || event.ctrlKey || event.code !== 'Backslash' || busy.value) return
   event.preventDefault()
   updateSelection(true)
@@ -292,7 +491,10 @@ async function getDocument(variant, regenerate = false) {
 
 function activateDocument(variant, document) {
   selectionUnsubscribe?.()
+  equationUnsubscribe?.()
   selectionUnsubscribe = null
+  equationUnsubscribe = null
+  equationSources.clear()
   editor.value = null
   bytes.value = document
   editing.value = variant
@@ -409,7 +611,7 @@ function exportFile(variant, format) {
             <button v-for="(question, index) in exam.questions" :key="question.id" type="button" :disabled="!ready"
               :aria-pressed="question.id === selected" class="exam-question" @mousedown.prevent @click="locate(question)">
               <span>{{ index + 1 }} · {{ examKinds[question.kind] }}<template v-if="question.points"> · {{ question.points }} 分</template></span>
-              <strong>{{ question.text.split('\n')[0] }}</strong>
+              <strong><MathPreview :source="question.text.split('\n')[0]" /></strong>
               <small v-if="!question.confirmed">{{ question.placeholder ? '空题位 · 待确认' : '待确认' }}</small>
             </button>
           </div>
@@ -420,23 +622,31 @@ function exportFile(variant, format) {
             <button class="button subtle" :disabled="!ready" @click="removeMarker">移除题目标记</button>
           </div>
         </aside>
-        <section class="word-editor" :aria-label="`Word ${documentLabels[editing]}编辑器`" @keydown.capture="editing === 'paper' && editorShortcut($event)">
+        <section class="word-editor" :aria-label="`Word ${documentLabels[editing]}编辑器`" @keydown.capture="editorShortcut($event)">
           <LocaleProvider :i18n="zhCN">
             <DocxEditorRoot :key="documentKey" :document="bytes" locale="zh-CN" :color-mode="theme" :fonts="fonts" @ready="editorReady" @change="documentChanged">
               <div class="word-toolbar"><DocxEditorToolbar>
                 <DocxEditorToolbar.Group id="insert" label="插入" after="text" :priority="75">
                   <DocxEditorToolbar.ImageInsert /><DocxEditorToolbar.TableInsert />
+                  <button type="button" class="exam-formula-tool" title="插入公式" aria-label="插入公式"
+                    :disabled="!ready" @mousedown.prevent @click="openWordFormula()"><Sigma :size="16" /> 公式</button>
                 </DocxEditorToolbar.Group>
               </DocxEditorToolbar></div>
+              <DocxEditorUnsupportedElement :match="isEquation">
+                <template #default="{ element }">
+                  <button v-equation-box type="button" class="word-math-vector" aria-label="编辑此公式" @pointerdown.prevent
+                    @click.stop="openPreviewEquation(element, $event)"><MathPreview :source="rememberEquation(element)" /></button>
+                </template>
+              </DocxEditorUnsupportedElement>
               <div class="word-actions">
                 <form v-if="wordPages" class="word-page-number" @submit.prevent="jumpPage">
                   <label>页 <input name="page" :value="wordPage" aria-label="跳转到试卷页码" type="number" min="1" :max="wordPages"></label>
                   <span>/ {{ wordPages }}</span>
                 </form>
               </div>
-              <div class="word-canvas" @scroll.capture="updatePage">
+              <div class="word-canvas" @scroll.capture="updatePage" @click.capture="onEquationClick">
                 <DocxEditorViewport class="word-viewport">
-                  <DocxEditorContent /><DocxEditorHyperLink /><DocxEditorContextMenu /><DocxEditorEquation /><DocxEditorContentControl />
+                  <DocxEditorContent /><DocxEditorHyperLink /><DocxEditorContextMenu /><DocxEditorContentControl />
                 </DocxEditorViewport>
                 <DocxEditorLoading overlay />
               </div>
@@ -469,13 +679,21 @@ function exportFile(variant, format) {
         <p v-if="formError" class="error" role="alert">{{ formError }}</p>
       </div>
     </Modal>
-    <Modal :open="modal === 'metadata'" title="题目信息与教师答案" @close="!busy && (modal = '')">
+    <Modal :open="modal === 'formula'" :title="formula?.replace ? '编辑公式' : '插入数学公式'" wide @close="!busy && closeFormula()">
+      <FormulaEditor v-if="formula" :initial="formula.source" :replace="formula.replace" :busy="busy" @apply="applyFormula" />
+      <p v-if="formError" class="error" role="alert">{{ formError }}</p>
+    </Modal>
+    <Modal :open="modal === 'metadata'" title="题目信息与教师答案" wide @close="!busy && (modal = '')">
       <form v-if="meta" class="stack" @submit.prevent="saveMetadata">
         <label>题型<select v-model="meta.kind"><option v-for="(label, key) in examKinds" :key="key" :value="key">{{ label }}</option></select></label>
         <label>分值<input v-model.number="meta.points" type="number" min="1" max="100"></label>
         <label>标签<input v-model="meta.tags" maxlength="240" placeholder="例如：编程、函数"></label>
-        <label>参考答案<textarea v-model="meta.answer" rows="3" maxlength="3000"></textarea></label>
-        <label>解析与评分要点<textarea v-model="meta.explanation" rows="4" maxlength="4000"></textarea></label>
+        <label>参考答案<textarea ref="answerInput" v-model="meta.answer" rows="3" maxlength="3000"></textarea></label>
+        <button type="button" class="button secondary formula-keyboard-toggle" @mousedown.prevent @click="openTextFormula('answer')"><Sigma :size="15" /> 编辑答案公式</button>
+        <div v-if="meta.answer" class="formula-preview" aria-label="参考答案预览"><MathPreview :source="meta.answer" /></div>
+        <label>解析与评分要点<textarea ref="explanationInput" v-model="meta.explanation" rows="4" maxlength="4000"></textarea></label>
+        <button type="button" class="button secondary formula-keyboard-toggle" @mousedown.prevent @click="openTextFormula('explanation')"><Sigma :size="15" /> 编辑评分公式</button>
+        <div v-if="meta.explanation" class="formula-preview" aria-label="评分要点预览"><MathPreview :source="meta.explanation" /></div>
         <p v-if="formError" class="error" role="alert">{{ formError }}</p>
         <div class="dialog-actions"><button type="submit" class="button primary" :disabled="busy">保存并确认题目</button></div>
       </form>
@@ -487,10 +705,10 @@ function exportFile(variant, format) {
         </select></label>
         <label>修改要求<textarea v-model="instruction" rows="3" maxlength="2000" :disabled="busy" @input="candidate = null"></textarea></label>
         <div v-if="candidate" class="exam-comparison">
-          <div><h3>原题</h3><pre>{{ active?.text }}</pre><p>参考答案 · {{ active?.answer || '未填写' }}</p></div>
-          <div><h3>候选 · {{ candidate.question.points }} 分</h3><pre>{{ candidate.question.stem }}</pre>
-            <ol v-if="candidate.question.options.length" type="A"><li v-for="(option, i) in candidate.question.options" :key="i">{{ option }}</li></ol>
-            <p>参考答案 · {{ candidate.question.answer }}</p><pre v-if="candidate.question.explanation">{{ candidate.question.explanation }}</pre>
+          <div><h3>原题</h3><MathPreview :source="active?.text" /><p>参考答案 · <MathPreview :source="active?.answer || '未填写'" /></p></div>
+          <div><h3>候选 · {{ candidate.question.points }} 分</h3><MathPreview :source="candidate.question.stem" />
+            <ol v-if="candidate.question.options.length" type="A"><li v-for="(option, i) in candidate.question.options" :key="i"><MathPreview :source="option" /></li></ol>
+            <p>参考答案 · <MathPreview :source="candidate.question.answer" /></p><MathPreview v-if="candidate.question.explanation" :source="candidate.question.explanation" />
           </div>
         </div>
         <p v-for="reference in candidate?.references" :key="reference.title" class="muted">{{ reference.title }} · 第 {{ reference.pages.join('、') }} 页</p>

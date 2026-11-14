@@ -362,6 +362,7 @@ class WorkflowTest(unittest.TestCase):
         self.assertIn("80mm", tex_sheet)
         self.assertNotIn("教师答案", tex_sheet)
         self.assertIn("教师答案主观题", client.get(f"{path}/export/answers/tex").raise_for_status().content.decode())
+        self.check_exam_formulas(client, course)
         doc.add_paragraph("补充作答须知")
         changed = BytesIO()
         doc.save(changed)
@@ -386,6 +387,47 @@ class WorkflowTest(unittest.TestCase):
         }).raise_for_status().json()
         self.assertFalse(rebuilt["edited"])
         self.assertFalse(rebuilt["stale"])
+
+    def check_exam_formulas(self, client, course):
+        from app.exam_math import SOURCE, equation_source
+
+        calculus = r"\int_0^1\frac{1}{1+x^2}\,dx"
+        matrix = r"\begin{bmatrix}1&2\\3&4\end{bmatrix}"
+        derivation = r"\begin{aligned}\det A&=4-6\\&=-2\end{aligned}"
+        for latex in (calculus, matrix, derivation):
+            result = client.post("/api/exams/equation", json={"latex": latex}).raise_for_status().json()["omml"]
+            self.assertIn("<m:oMath", result)
+        self.assertEqual(client.post("/api/exams/equation", json={"latex": r"\input{test}"}).status_code, 422)
+        self.assertEqual(client.post("/api/exams/equation", json={"latex": r"\frac{1}"}).status_code, 422)
+        word = Document()
+        first = word.add_paragraph("1. 求 ")
+        first.add_run(r"\(\int_0^1")
+        first.add_run(r"\frac{1}{1+x^2}\,dx\)（4分）").bold = True
+        word.add_paragraph(f"2. 求 {matrix.join(['$', '$'])} 的行列式（6分）")
+        buf = BytesIO()
+        word.save(buf)
+        exam = client.post("/api/exams/import", data={"course_id": course}, files={
+            "file": ("calculus.docx", buf.getvalue()),
+        }).raise_for_status().json()
+        path = f"/api/exams/{exam['id']}"
+        doc = Document(BytesIO(client.get(f"{path}/document").raise_for_status().content))
+        equations = list(doc.element.body.iter(qn("m:oMath")))
+        self.assertEqual([equation_source(node) for node in equations], [calculus, matrix])
+        self.assertIsNotNone(equations[1].find(".//" + qn("m:m")))
+        self.assertTrue(doc.paragraphs[0].runs[-1].bold)
+        generated = [
+            {"kind": "written", "points": 10, "stem": f"求 \\({calculus}\\)", "answer": r"\(\frac{\pi}{4}\)"},
+            {"kind": "written", "points": 10, "stem": f"求 \\({matrix}\\) 的行列式", "answer": r"\(-2\)", "explanation": f"计算 \\({derivation}\\)"},
+        ]
+        with patch("app.exams.generate", return_value=json.dumps({"questions": generated})):
+            exam = client.post("/api/exams/generate", json={"course_id": course, "title": "数学试卷",
+                               "groups": [{"kind": "written", "count": 2, "points": 10}]}).raise_for_status().json()
+        path = f"/api/exams/{exam['id']}"
+        answer = Document(BytesIO(client.get(f"{path}/answers/document", params={
+            "revision": exam["revision"],
+        }).raise_for_status().content))
+        self.assertIn(derivation, [node.get(SOURCE) for node in answer.element.body.iter(qn("m:oMath"))])
+        self.assertIn(matrix, client.get(f"{path}/export/paper/tex").raise_for_status().text)
 
     def check_lesson_templates(self, client, course, legacy_route):
         templates = "/api/lesson-templates"
