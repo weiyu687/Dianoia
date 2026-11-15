@@ -2,10 +2,12 @@
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { Layer as VLayer, Line as VLine, Rect as VRect, Stage as VStage, Transformer as VTransformer } from 'vue-konva'
 import SlideArtwork from './SlideArtwork.vue'
+import SlideMedia from './SlideMedia.vue'
 import { height, width } from '../presentation'
 
 const props = defineProps({ slide: { type: Object, required: true }, selected: { type: Array, default: () => [] },
-  zoom: { type: Number, default: 1 }, editable: Boolean })
+  zoom: { type: Number, default: 1 }, editable: Boolean, mediaEndpoint: String,
+  motion: { type: Object, default: () => ({}) } })
 const emit = defineEmits(['select', 'edit', 'move', 'transform'])
 const SlideFormula = defineAsyncComponent(() => import('./SlideFormula.vue'))
 const viewport = ref(null)
@@ -18,6 +20,7 @@ const moving = ref({})
 const guides = ref({ x: null, y: null })
 const equations = computed(() => props.slide.elements.filter((item) => item.kind === 'formula')
   .map((item) => ({ ...item, ...moving.value[item.id] })))
+const media = computed(() => props.mediaEndpoint ? props.slide.elements.filter((item) => item.media_id) : [])
 let observer, drag
 onMounted(() => {
   observer = new ResizeObserver(([entry]) => {
@@ -104,7 +107,7 @@ function empty(event) { if (!event.target.id()) emit('select', '', false) }
       <VStage :config="{ width: scale * width, height: scale * height, onMousedown: empty, onTap: empty }">
         <VLayer ref="layer" :config="{ scaleX: scale, scaleY: scale }">
           <VRect :config="{ width, height, fill: slide.background }" />
-          <SlideArtwork v-for="item in slide.elements" :key="item.id" :item="item" :editable="editable"
+          <SlideArtwork v-for="item in slide.elements" :key="item.id" :item="item" :editable="editable" :motion="motion[item.id]"
             @pick="pick" @edit="emit('edit', $event)" @move-start="dragStart" @move="dragMove" @move-end="dragEnd" />
           <VLine v-if="guides.x !== null" :config="{ points:[guides.x,0,guides.x,height], stroke:'#7974ff', strokeWidth:1, dash:[5,4], listening:false }" />
           <VLine v-if="guides.y !== null" :config="{ points:[0,guides.y,width,guides.y], stroke:'#7974ff', strokeWidth:1, dash:[5,4], listening:false }" />
@@ -115,7 +118,8 @@ function empty(event) { if (!event.target.id()) emit('select', '', false) }
             onTransformend: transform }" />
         </VLayer>
       </VStage>
-      <SlideFormula v-for="item in equations" :key="item.id" :item="item" :scale="scale" />
+      <SlideFormula v-for="item in equations" :key="item.id" :item="item" :scale="scale" :motion="motion[item.id]" />
+      <SlideMedia v-for="item in media" :key="item.id" :item="item" :scale="scale" :motion="motion[item.id]" :endpoint="mediaEndpoint" />
     </div>
   </div>
 </template>

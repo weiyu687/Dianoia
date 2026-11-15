@@ -5,7 +5,7 @@ import { Arrow as VArrow, Ellipse as VEllipse, Group as VGroup, Image as VImage,
 import { labels, shapePolygons } from '../presentation'
 import SlideChart from './SlideChart.vue'
 
-const props = defineProps({ item: { type: Object, required: true }, editable: Boolean })
+const props = defineProps({ item: { type: Object, required: true }, editable: Boolean, motion: Object })
 const emit = defineEmits(['pick', 'edit', 'moveStart', 'move', 'moveEnd'])
 const picture = shallowRef(null)
 const polygon = computed(() => shapePolygons[props.item.shape]?.map((value, i) => value * (i % 2 ? props.item.height : props.item.width)))
@@ -26,7 +26,9 @@ watch(() => props.item.image, (source, _, dispose) => {
 
 const config = computed(() => {
   const { id, x, y, rotation, width, height, locked } = props.item
-  return { id, name: labels[props.item.kind], x, y, rotation, width, height,
+  const { opacity = 1, dy = 0, scale = 1 } = props.motion || {}
+  return { id, name: labels[props.item.kind], x: x + width * (1 - scale) / 2, y: y + dy + height * (1 - scale) / 2,
+    rotation, width, height, opacity, scaleX: scale, scaleY: scale,
     draggable: props.editable && !locked, listening: props.editable,
     onMousedown: pick, onTap: pick, onDblclick: edit, onDbltap: edit,
     onDragstart: dragStart, onDragmove: dragMove, onDragend: dragEnd }
@@ -44,6 +46,11 @@ const cells = computed(() => {
   return rows.flatMap((row, r) => row.map((text, c) => ({
     x: c * w, y: r * h, width: w, height: h, text, header: r === 0,
   })))
+})
+const media = computed(() => {
+  const { width, height, text, kind } = props.item
+  const icon = Math.min(width, height) * .26
+  return { width, height, text, kind, icon }
 })
 function pick(event) {
   if (!props.editable) return
@@ -66,6 +73,13 @@ function dragEnd(event) { emit('moveEnd', props.item.id, event) }
     <VRect v-if="!['connector','connectorArrow'].includes(item.shape) || item.kind !== 'shape'" :config="{ width: item.width, height: item.height, fill: 'rgba(0,0,0,0.001)' }" />
     <VText v-if="item.kind === 'text'" :config="textConfig" />
     <VImage v-else-if="item.kind === 'image' && picture" :config="{ image: picture, width: item.width, height: item.height }" />
+    <template v-else-if="item.media_id">
+      <VRect :config="{ width:media.width,height:media.height,fill:'#1b2441',cornerRadius:7 }" />
+      <VText :config="{ width:media.width, y:Math.max(2,media.height*.3-media.icon/2), text:media.kind === 'video' ? '▶' : '♫',
+        fontSize:media.icon, fill:'#d8deff', align:'center' }" />
+      <VText :config="{ x:5, y:media.height*.59, width:media.width-10, height:media.height*.36,
+        text:media.text, ellipsis:true, wrap:'none', fontSize:Math.min(18,media.height*.21), fill:'#ffffff', align:'center' }" />
+    </template>
     <template v-else-if="item.kind === 'shape'">
       <VEllipse v-if="item.shape === 'ellipse'" :config="{ x: item.width/2, y: item.height/2, radiusX: item.width/2, radiusY: item.height/2, fill: item.fill, stroke: item.stroke, strokeWidth: 2 }" />
       <VLine v-else-if="item.shape === 'connector'" :config="line" />

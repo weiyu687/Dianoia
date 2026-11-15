@@ -17,6 +17,7 @@ function updateNumber(key, lower, upper, event) {
 <template>
   <aside class="presentation-inspector">
     <div class="presentation-inspector-body">
+      <slot />
       <template v-if="selected.length > 1">
         <h3>{{ selected.length }} 个对象</h3>
         <div class="presentation-control-row">
@@ -96,7 +97,9 @@ function updateNumber(key, lower, upper, event) {
             <label>公式字号<input type="number" min="8" max="144" :value="item.size" @change="updateNumber('size',8,144,$event)"></label>
             <label class="presentation-color">公式颜色<input type="color" :value="item.color" @change="emit('change',{color:$event.target.value})"></label>
           </template>
-          <button v-if="['text','table','chart','image','formula'].includes(item.kind)" class="button secondary" @click="emit('edit',item.id)">{{ item.kind === 'image' ? '替换图片' : item.kind === 'formula' ? '编辑公式' : '编辑内容' }}</button>
+          <button v-if="item.kind !== 'shape'" class="button secondary" @click="emit('edit',item.id)">
+            {{ item.media_id ? '预览或替换媒体' : item.kind === 'image' ? '替换图片' : item.kind === 'formula' ? '编辑公式' : '编辑内容' }}
+          </button>
           <label>对齐画布<select value="" @change="emit('align',$event.target.value,true); $event.target.value = ''">
             <option value="" disabled>选择对齐位置</option><option value="left">左侧</option><option value="center">水平居中</option><option value="right">右侧</option>
             <option value="top">顶部</option><option value="middle">垂直居中</option><option value="bottom">底部</option>

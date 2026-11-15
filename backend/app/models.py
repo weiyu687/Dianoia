@@ -197,6 +197,21 @@ class TeachingPresentation(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
 
 
+class PresentationMedia(Base):
+    __tablename__ = "presentation_media"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=identifier)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id"), index=True)
+    filename: Mapped[str] = mapped_column(String(160))
+    kind: Mapped[str] = mapped_column(String(8))
+    size: Mapped[int] = mapped_column(Integer)
+    duration_ms: Mapped[int] = mapped_column(Integer)
+    width: Mapped[int] = mapped_column(Integer, default=0)
+    height: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
 class TeachingPresentationTemplate(Base):
     __tablename__ = "teaching_presentation_templates"
 

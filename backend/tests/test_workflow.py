@@ -4,7 +4,9 @@ import unittest
 from base64 import b64decode
 from io import BytesIO
 from tempfile import TemporaryDirectory
+from pathlib import Path
 from unittest.mock import patch
+from zipfile import ZipFile
 from uuid import uuid4
 
 from docx import Document
@@ -171,6 +173,7 @@ class WorkflowTest(unittest.TestCase):
 
                 private_template = self.check_lesson_templates(client, course, route)
                 presentation, slide_template = self.check_presentations(client, course, resource["id"])
+                media_id = self.check_presentation_media(client, course)
                 mind_map, map_template = self.check_mind_maps(client, course, resource["id"])
                 exam = self.check_exams(client, course)
                 second_teacher = login("t02", "teacher")
@@ -184,6 +187,10 @@ class WorkflowTest(unittest.TestCase):
                 self.assertEqual(client.get(f"/api/exams/{exam}").status_code, 404)
                 self.assertEqual(client.get(f"/api/presentations/{presentation}").status_code, 404)
                 self.assertEqual(client.get(f"/api/presentation-templates/{slide_template}").status_code, 404)
+                foreign_deck = client.post("/api/presentations", json={
+                    "course_id": second_teacher["courses"][0]["id"], "title": "不同教师的课件",
+                }).raise_for_status().json()
+                self.assertEqual(client.get(f"/api/presentations/{foreign_deck['id']}/media/{media_id}").status_code, 404)
                 self.assertEqual(client.post("/api/lessons", json={
                     "course_id": second_teacher["courses"][0]["id"], "title": "未授权模板",
                     "template_id": private_template,
@@ -284,6 +291,36 @@ class WorkflowTest(unittest.TestCase):
         self.assertTrue(any(element["kind"] == "chart" for element in referenced["document"]["slides"][1]["elements"]))
         self.assertTrue(any("p.2" in element["text"] for element in referenced["document"]["slides"][1]["elements"]))
         self.assertFalse(any(element["kind"] == "chart" for element in disabled["document"]["slides"][1]["elements"]))
+
+    def check_presentation_media(self, client, course):
+        created = client.post("/api/presentations", json={"course_id": course, "title": "媒体与动画"}).raise_for_status().json()
+        route = f"/api/presentations/{created['id']}"
+        payload = b"synthetic audio fixture"
+        with patch("app.presentation_media.probe_media", return_value=(1000, 0, 0)) as probe:
+            asset = client.post(f"{route}/media?kind=audio", files={
+                "file": ("audio.mp3", payload, "audio/mpeg"),
+            }).raise_for_status().json()
+            self.assertEqual(probe.call_args.args[0].suffix, ".upload")
+        stream = client.get(f"{route}/media/{asset['id']}", headers={"Range": "bytes=0-3"})
+        self.assertEqual((stream.status_code, stream.content), (206, payload[:4]))
+        slide = created["document"]["slides"][0]
+        slide["elements"].append({"id": "audio", "kind": "audio", "media_id": asset["id"], "text": "audio.mp3"})
+        slide["animations"] = [{"target_id": "missing", "effect": "fade_in"}]
+        self.assertEqual(client.put(route, json=created).status_code, 422)
+        slide["animations"][0]["target_id"] = "audio"
+        saved = client.put(route, json=created).raise_for_status().json()
+        pptx = client.get(f"{route}/export/pptx").raise_for_status()
+        with ZipFile(BytesIO(pptx.content)) as package:
+            media = next(name for name in package.namelist() if Path(name).suffix == ".mp3")
+            self.assertEqual(package.read(media), payload)
+            xml = package.read("ppt/slides/slide1.xml")
+            self.assertIn(b"<a:audioFile", xml)
+            self.assertIn(b'presetClass="entr"', xml)
+        template = client.post(f"{route}/template", json={"title": "仅复用模板", "revision": saved["revision"]}).raise_for_status().json()
+        document = client.get(f"/api/presentation-templates/{template['id']}").raise_for_status().json()["document"]
+        self.assertEqual(document["slides"][0]["elements"], [])
+        self.assertEqual(document["slides"][0]["animations"], [])
+        return asset["id"]
 
     def check_mind_maps(self, client, course, resource_id):
         maps, templates = "/api/mind-maps", "/api/mind-map-templates"

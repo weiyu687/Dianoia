@@ -2,7 +2,7 @@
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, shallowRef } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, ArrowDown, ArrowUp, BarChart3, ChartArea, ChartBar, ChartLine, ChartPie, ChartScatter,
-  Copy, Donut, Download, FileImage, Play, Plus, Radar, Redo2, Save, Shapes, Sigma, Sparkles, Table2, Trash2, Type, Undo2, X } from 'lucide-vue-next'
+  Copy, Donut, Download, Film, FileImage, Play, Plus, Radar, Redo2, Save, Shapes, Sigma, Sparkles, Table2, Trash2, Type, Undo2, WandSparkles, X } from 'lucide-vue-next'
 import { api, download } from '../api'
 import Modal from '../components/Modal.vue'
 import MapSources from '../components/MapSources.vue'
@@ -11,6 +11,9 @@ import SlideCanvas from '../components/SlideCanvas.vue'
 import SlideInspector from '../components/SlideInspector.vue'
 import SlideThumbnail from '../components/SlideThumbnail.vue'
 import SlideShapeIcon from '../components/SlideShapeIcon.vue'
+import SlideAnimations from '../components/SlideAnimations.vue'
+import SlideMediaPicker from '../components/SlideMediaPicker.vue'
+import { usePresentationPlayback } from '../presentationPlayback'
 import { chartTypes, clone, height, layouts, newElement, newSlide, readableInk, shapeGroups, shapes, slideTitle, uid, width } from '../presentation'
 import '../presentations.css'
 
@@ -46,6 +49,9 @@ const pdfPage = ref(1)
 const play = ref(false)
 const playIndex = ref(0)
 const playSurface = ref(null)
+const animationPanel = ref(false)
+const playback = usePresentationPlayback()
+const { states: motion, cursor: animationIndex, running: animating } = playback
 const busy = ref(false)
 const loading = ref(true)
 const error = ref('')
@@ -57,6 +63,8 @@ const document = computed(() => row.value?.document)
 const page = computed(() => document.value?.slides.find((slide) => slide.id === active.value))
 const item = computed(() => selected.value.length === 1 ? page.value?.elements.find((object) => object.id === selected.value[0]) : null)
 const pageNumber = computed(() => document.value.slides.findIndex((slide) => slide.id === active.value) + 1)
+const playingPage = computed(() => document.value?.slides[playIndex.value])
+const pendingAnimation = computed(() => animationIndex.value < (playingPage.value?.animations?.length || 0))
 const citeNames = computed(() => Object.fromEntries(references.value.map((resource) => [resource.id, resource.title])))
 const snapshot = () => ({ title: row.value.title, document: clone(document.value), active: active.value })
 
@@ -82,6 +90,7 @@ onMounted(async () => {
   finally { loading.value = false }
 })
 onUnmounted(() => {
+  playback.stop()
   window.removeEventListener('keydown', shortcuts)
   window.removeEventListener('pointerdown', closeToolFromOutside)
   window.removeEventListener('beforeunload', leave)
@@ -172,6 +181,26 @@ function addObject(kind, fields) {
   const object = newElement(kind, fields)
   change(() => { page.value.elements.push(object); selected.value = [object.id] })
 }
+function addAnimation() {
+  if (!item.value || (page.value.animations?.length || 0) >= 50) return
+  change(() => {
+    page.value.animations ||= []
+    page.value.animations.push({ id: uid(), target_id: item.value.id, effect: 'fade_in', trigger: 'click', duration_ms: 500 })
+  })
+}
+function updateAnimation(id, changes) {
+  const entry = page.value.animations.find((item) => item.id === id)
+  if (entry) change(() => Object.assign(entry, changes))
+}
+function removeAnimation(id) {
+  change(() => { page.value.animations = page.value.animations.filter((entry) => entry.id !== id) })
+}
+function moveAnimation(index, delta) {
+  const animations = page.value.animations
+  const next = index + delta
+  if (next < 0 || next >= animations.length) return
+  change(() => { animations.splice(next, 0, animations.splice(index, 1)[0]) })
+}
 function setItem(fields) { if (item.value) change(() => Object.assign(item.value, fields)) }
 function toggleTool(name) { toolMenu.value = toolMenu.value === name ? '' : name }
 function closeToolFromOutside(event) {
@@ -231,6 +260,8 @@ function deleteSelection() {
   if (!selected.value.length) return
   change(() => {
     page.value.elements = page.value.elements.filter((object) => object.locked || !selected.value.includes(object.id))
+    const remaining = new Set(page.value.elements.map((object) => object.id))
+    page.value.animations = (page.value.animations || []).filter((entry) => remaining.has(entry.target_id))
     selected.value = []
   })
 }
@@ -321,10 +352,28 @@ function editContent(id) {
   if (!target || target.locked) return
   if (target.kind === 'image') { openImage(id); return }
   if (target.kind === 'formula') { openFormula(target); return }
+  if (target.media_id) { openMedia(target.kind, target); return }
   if (target.kind === 'shape') return
   formError.value = ''
   modal.value = { type: 'element', item: clone(target) }
   nextTick(() => window.document.querySelector('.presentation-text-input')?.focus())
+}
+function openMedia(kind, target = null) {
+  if (!target && page.value.elements.length >= 100) return
+  toolMenu.value = ''
+  modal.value = { type: 'media', kind, item: target }
+}
+function applyMedia(asset) {
+  const target = modal.value.item
+  const fields = { media_id: asset.id, text: asset.filename }
+  if (target) change(() => Object.assign(target, fields))
+  else if (asset.kind === 'audio') addObject('audio', { ...fields, width: 340, height: 92 })
+  else {
+    const proportion = asset.width / asset.height
+    const mediaHeight = Math.min(300, 540 / proportion)
+    addObject('video', { ...fields, width: Math.max(100, mediaHeight * proportion), height: Math.max(70, mediaHeight) })
+  }
+  modal.value = null
 }
 function openFormula(target = null) {
   formError.value = ''
@@ -470,14 +519,28 @@ function startPlay(fromBeginning) {
   toolMenu.value = ''
   playIndex.value = fromBeginning ? 0 : pageNumber.value - 1
   play.value = true
+  playback.enter(playingPage.value)
   nextTick(() => playSurface.value?.focus())
 }
-function step(delta) { playIndex.value = Math.max(0, Math.min(document.value.slides.length - 1, playIndex.value + delta)) }
+function closePlay() {
+  playback.stop()
+  play.value = false
+}
+function step(delta) {
+  if (delta > 0 && playback.advance()) return
+  const nextPage = Math.max(0, Math.min(document.value.slides.length - 1, playIndex.value + delta))
+  if (nextPage === playIndex.value) return
+  playIndex.value = nextPage
+  playback.enter(playingPage.value)
+}
 function shortcuts(event) {
   if (!page.value || event.isComposing) return
   if (play.value) {
-    if (event.key === 'Escape') play.value = false
-    if (['ArrowRight','ArrowDown','PageDown',' '].includes(event.key)) { event.preventDefault(); step(1) }
+    if (event.key === 'Escape') { closePlay(); return }
+    if (event.target.closest?.('[data-presentation-media]')) return
+    if (['ArrowRight','ArrowDown','PageDown',' '].includes(event.key) || (event.key === 'Enter' && event.target === playSurface.value)) {
+      event.preventDefault(); step(1)
+    }
     if (['ArrowLeft','ArrowUp','PageUp'].includes(event.key)) { event.preventDefault(); step(-1) }
     return
   }
@@ -567,6 +630,13 @@ function shortcuts(event) {
               </div>
             </div>
             <button class="button subtle" @click="openImage(null)"><FileImage :size="16" /> 图片</button>
+            <div class="presentation-menu-wrap">
+              <button class="button subtle" :aria-expanded="toolMenu === 'media'" @click="toggleTool('media')"><Film :size="16" /> 音视频</button>
+              <div v-if="toolMenu === 'media'" class="panel presentation-menu">
+                <button type="button" class="button subtle" @click="openMedia('audio')">插入音频</button>
+                <button type="button" class="button subtle" @click="openMedia('video')">插入视频</button>
+              </div>
+            </div>
             <button class="button subtle" @click="addObject('table')"><Table2 :size="16" /> 表格</button>
             <div class="presentation-menu-wrap">
               <button class="button subtle" :aria-expanded="toolMenu === 'chart'" @click="toggleTool('chart')"><BarChart3 :size="16" /> 图表</button>
@@ -589,7 +659,10 @@ function shortcuts(event) {
               </div>
             </div>
           </div>
-          <div class="presentation-toolgroup"><button class="button subtle" @click="openDialog('AI')"><Sparkles :size="17" /> AI 局部生成</button></div>
+          <div class="presentation-toolgroup">
+            <button class="button subtle" :aria-pressed="animationPanel" @click="animationPanel = !animationPanel"><WandSparkles :size="17" /> 动画</button>
+            <button class="button subtle" @click="openDialog('AI')"><Sparkles :size="17" /> AI 局部生成</button>
+          </div>
         </div>
         <aside class="presentation-pages">
           <div class="presentation-page-tools">
@@ -626,27 +699,34 @@ function shortcuts(event) {
         </section>
         <SlideInspector :slide="page" :item="item" :selected="selected" @change="setItem" @select="select" @edit="editContent" @align="alignSelection"
           @background-all="applyBackground" @transition="setTransition" @global-font="applyFont" @unlock-shapes="unlockShapes"
-          @background="change(() => page.background = $event)" @delete="deleteSelection" @layer="rearrange" @group="organize()" @ungroup="organize(true)" />
+          @background="change(() => page.background = $event)" @delete="deleteSelection" @layer="rearrange" @group="organize()" @ungroup="organize(true)">
+          <SlideAnimations v-if="animationPanel" :slide="page" :item="item" @add="addAnimation" @update="updateAnimation"
+            @remove="removeAnimation" @move="moveAnimation" @select="select" />
+        </SlideInspector>
       </div>
       <input ref="fileInput" type="file" accept="image/png,image/jpeg" hidden @change="loadImage">
       <Teleport to="body">
         <div v-if="play" class="presentation-player" role="dialog" aria-modal="true" aria-label="放映">
-          <button ref="playSurface" type="button" class="presentation-play-surface" aria-label="点击画面翻到下一页" @click="step(1)">
-            <SlideCanvas :key="playIndex" :slide="document.slides[playIndex]" :class="'presentation-transition-' + document.slides[playIndex].transition" />
-          </button>
+          <div ref="playSurface" class="presentation-play-surface" role="region" tabindex="0" aria-label="放映画面" @click="step(1)">
+            <SlideCanvas :key="playIndex" :slide="playingPage" :motion="motion" :media-endpoint="endpoint" :class="'presentation-transition-' + playingPage.transition" />
+          </div>
           <div class="presentation-play-controls"><button class="button secondary" :disabled="!playIndex" @click="step(-1)">上一页</button>
             <span>{{ playIndex + 1 }} / {{ document.slides.length }}</span>
-            <button class="button secondary" :disabled="playIndex === document.slides.length-1" @click="step(1)">下一页</button>
-            <button class="button secondary icon-only" aria-label="退出放映" @click="play = false"><X :size="18" /></button></div>
+            <button class="button secondary" :disabled="animating || (!pendingAnimation && playIndex === document.slides.length-1)" @click="step(1)">
+              {{ pendingAnimation ? '下一动画' : '下一页' }}</button>
+            <button class="button secondary icon-only" aria-label="退出放映" @click="closePlay"><X :size="18" /></button></div>
         </div>
       </Teleport>
     </template>
-    <Modal :open="!!modal" :title="{ element:'编辑内容', sources:'课件参考资料', cite:'本页引用', template:'存为模板', AI:'AI 局部生成', formula:'课件公式' }[modal?.type]"
+    <Modal :open="!!modal" :title="{ element:'编辑内容', sources:'课件参考资料', cite:'本页引用', template:'存为模板', AI:'AI 局部生成', formula:'课件公式',
+      media:modal?.kind === 'audio' ? '课件音频' : '课件视频' }[modal?.type]"
       wide @close="!busy && (modal = null)">
       <template v-if="modal?.type === 'formula'">
         <FormulaEditor :initial="modal.item?.latex || ''" :replace="!!modal.item" :busy="busy" @apply="applyFormula" />
         <p v-if="formError" class="error" role="alert">{{ formError }}</p>
       </template>
+      <SlideMediaPicker v-else-if="modal?.type === 'media'" :endpoint="endpoint" :kind="modal.kind" :current="modal.item?.media_id"
+        @attach="applyMedia" @busy="busy = $event" />
       <form v-else-if="modal" class="stack" @submit.prevent="modal.type === 'AI' ? suggest() : saveDialog()">
         <template v-if="modal.type === 'element'">
           <label v-if="modal.item.kind === 'text'">文本框内容<textarea v-model="modal.item.text" rows="7" maxlength="4000" class="presentation-text-input" /></label>

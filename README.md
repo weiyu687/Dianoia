@@ -35,6 +35,7 @@ npm run dev
 - 资料、教案和模板的 PDF 预览均可连续滚动，支持输入页码跳转。资料目录也可直接跳页。
 - 从教师端「思维导图」空白新建、AI 生成或使用模板。画布中双击编辑主题，按 `Tab` 添加子主题，按 `Enter` 添加同级主题。节点可挂载资料并跳转原文页。支持将编辑成果存为个人模板，并下载整图 PNG。导出时可勾选「标注参考资料页码」，资料名称集中列在图底。
 - 从教师端「试卷」导入 DOC 或 DOCX 原卷、管理 Word 模板，或按题型和资料页码组卷。进入 Word 编辑器后可确认题目并使用「AI 修改本题」。学生卷与教师答案可分别 PDF 预览、下载 DOC 或 DOCX。
+- 从「演示文稿」的「音视频」上传 MP3 或 H.264/AAC MP4，同一教师可在本课程复用单个文件。选中对象后打开「动画」可设置效果、触发方式、顺序和时长。放映时单击画面推进动画，当前页动画完成后再翻页。PPTX 内嵌音视频，PDF 显示静态媒体标签。
 
 ## 配置
 
@@ -49,6 +50,7 @@ npm run dev
 | `DIANOIA_MODEL_NAME` 和 `DIANOIA_MODEL_API_KEY` | 内容生成模型和服务凭据 |
 | `DIANOIA_AGENT_MODEL_NAME` | 可选，指定支持工具调用的 Agent 模型 |
 | `DIANOIA_SOFFICE` | LibreOffice 可执行文件路径，用于 Word、PPTX 和教案的 PDF 预览，以及旧 DOC 模板转换和 DOC 导出 |
+| `DIANOIA_FFPROBE` | 课件音视频上传所需的 ffprobe 可执行文件路径。留空时从 PATH 查找。部署时同时持久化 `DIANOIA_DATA_DIR/presentation-media` |
 | `DIANOIA_PDF_FONT` | 可选，旧教案 PDF 使用的中文 TrueType 字体路径 |
 | `DIANOIA_SCHOOL_NAME`、`DIANOIA_ACADEMIC_TERM` | 默认试卷、参考答案和答题卡中的学校与学期。可在 Word 编辑器中修订生成后的卷头 |
 | `DIANOIA_XELATEX` | 可选的 XeLaTeX 可执行文件路径，留空时从 PATH 查找。LaTeX PDF 需要 TeX Live 的 XeLaTeX、ctex、Fandol 中文字体、amsmath、geometry、fancyhdr、lastpage 和 needspace。下载 .tex 无需安装 TeX |

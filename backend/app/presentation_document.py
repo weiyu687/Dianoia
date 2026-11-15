@@ -22,6 +22,7 @@ from .lessons import Source
 from .exam_math import MATH_NS, MC_NS, SOURCE, equation_xml
 from .models import identifier
 from .presentation_templates import HEIGHT, WIDTH
+from .presentation_effects import SlideTiming, add_native_media
 
 DRAWING_2010_NS = "http://schemas.microsoft.com/office/drawing/2010/main"
 
@@ -35,7 +36,7 @@ ChartValue = Annotated[float, Field(ge=-1e12, le=1e12)]
 
 class Element(BaseModel):
     id: Key = Field(default_factory=identifier)
-    kind: Literal["text", "shape", "image", "table", "chart", "formula"]
+    kind: Literal["text", "shape", "image", "table", "chart", "formula", "audio", "video"]
     x: float = Field(default=80, ge=-WIDTH, le=WIDTH * 2)
     y: float = Field(default=80, ge=-HEIGHT, le=HEIGHT * 2)
     width: float = Field(default=280, ge=8, le=WIDTH * 2)
@@ -65,6 +66,7 @@ class Element(BaseModel):
     line_style: Literal["solid", "dash", "dot"] = "solid"
     line_width: float = Field(default=2, ge=1, le=20)
     image: str | None = Field(default=None, max_length=1_400_000)
+    media_id: Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{32}$")] | None = None
     rows: list[Annotated[list[TitleCell], Field(min_length=1, max_length=10)]] = Field(default_factory=list, max_length=14)
     labels: list[TitleCell] = Field(default_factory=list, max_length=16)
     values: list[ChartValue] = Field(default_factory=list, max_length=16)
@@ -73,6 +75,8 @@ class Element(BaseModel):
 
     @model_validator(mode="after")
     def check_content(self):
+        if (self.media_id is not None) != (self.kind in {"audio", "video"}):
+            raise ValueError("请为音视频对象选择已上传的文件")
         if self.kind == "formula":
             try:
                 equation_xml(self.latex)
@@ -108,6 +112,14 @@ class Element(BaseModel):
         return self
 
 
+class Animation(BaseModel):
+    id: Key = Field(default_factory=identifier)
+    target_id: Key
+    effect: Literal["fade_in", "fly_in", "emphasis", "fade_out"] = "fade_in"
+    trigger: Literal["click", "after"] = "click"
+    duration_ms: int = Field(default=500, ge=100, le=5000)
+
+
 class Slide(BaseModel):
     id: Key = Field(default_factory=identifier)
     background: Color = "#ffffff"
@@ -115,8 +127,18 @@ class Slide(BaseModel):
     theme: Key | None = None
     transition: Literal["none", "fade", "push"] = "none"
     elements: list[Element] = Field(default_factory=list, max_length=100)
+    animations: list[Animation] = Field(default_factory=list, max_length=50)
     notes: str = Field(default="", max_length=8000)
     citations: list[Source] = Field(default_factory=list, max_length=12)
+
+    @model_validator(mode="after")
+    def check_animations(self):
+        if len({animation.id for animation in self.animations}) != len(self.animations):
+            raise ValueError("动画编号重复")
+        targets = {item.id for item in self.elements}
+        if any(animation.target_id not in targets for animation in self.animations):
+            raise ValueError("动画目标必须是当前页上的对象")
+        return self
 
 
 class Deck(BaseModel):
@@ -207,7 +229,7 @@ def format_equation(frame, item):
     node.append(equation)
 
 
-def deck_pptx(title, deck, *, for_pdf=False):
+def deck_pptx(title, deck, *, for_pdf=False, media=None):
     document = Presentation()
     document.core_properties.title = title
     document.slide_width, document.slide_height = px(WIDTH), px(HEIGHT)
@@ -215,6 +237,7 @@ def deck_pptx(title, deck, *, for_pdf=False):
         slide = document.slides.add_slide(document.slide_layouts[6])
         slide.background.fill.solid()
         slide.background.fill.fore_color.rgb = rgb(source.background)
+        timing = SlideTiming()
         if source.transition != "none" and not for_pdf:
             transition = OxmlElement("p:transition")
             transition.set("spd", "fast")
@@ -236,6 +259,20 @@ def deck_pptx(title, deck, *, for_pdf=False):
                         shape.fill.fore_color.rgb = rgb("#f5f7fb")
                 else:
                     format_text(shape.text_frame, item)
+            elif item.kind in {"audio", "video"}:
+                asset = (media or {}).get(item.media_id)
+                if for_pdf:
+                    shape = slide.shapes.add_shape(MSO_AUTO_SHAPE_TYPE.ROUNDED_RECTANGLE, *position)
+                    shape.fill.solid()
+                    shape.fill.fore_color.rgb = rgb("#ecf1fa")
+                    shape.line.fill.background()
+                    name = asset.filename if asset else (item.text or "").strip()
+                    label = "音频" if item.kind == "audio" else "视频"
+                    format_text(shape.text_frame, item.model_copy(update={"color": "#263754", "size": 18, "align": "center"}),
+                                f"{label} · {name}")
+                else:
+                    shape = add_native_media(slide, item, asset, position)
+                    timing.add_media(shape.shape_id, item.kind, asset.duration_ms)
             elif item.kind == "image":
                 shape = slide.shapes.add_picture(BytesIO(b64decode(item.image.split(",", 1)[1])), *position)
             elif item.kind == "table":
@@ -313,15 +350,18 @@ def deck_pptx(title, deck, *, for_pdf=False):
                     shape.line.fill.background()
             if item.rotation and item.kind not in {"table", "chart"}:
                 shape.rotation = item.rotation % 360
-        # Consecutive objects can share a native PowerPoint group without disturbing other layers.
-        for group, entries in groupby(zip(source.elements, list(slide.shapes)), key=lambda entry: entry[0].group):
+        native_items = list(zip(source.elements, list(slide.shapes)))
+        target_ids = {item.id: shape.shape_id for item, shape in native_items}
+        for group, entries in groupby(native_items, key=lambda entry: entry[0].group):
             members = list(entries)
-            if group and len(members) > 1 and all(item.kind not in {"table", "chart"} for item, _ in members):
+            if group and len(members) > 1 and all(item.kind not in {"table", "chart", "audio", "video"} for item, _ in members):
                 shapes = [shape for _, shape in members]
                 anchor = shapes[-1]._element.getnext()
                 native = slide.shapes.add_group_shape(shapes)
                 if anchor is not None:
                     anchor.addprevious(native._element)
+        if not for_pdf:
+            timing.write(slide, source.animations, target_ids)
         if source.notes:
             slide.notes_slide.notes_text_frame.text = source.notes
     buffer = BytesIO()

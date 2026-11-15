@@ -1,6 +1,7 @@
 export const width = 960
 export const height = 540
-export const labels = { text: '文本框', shape: '形状', image: '图片', table: '表格', chart: '图表', formula: '公式' }
+export const labels = { text: '文本框', shape: '形状', image: '图片', table: '表格', chart: '图表', formula: '公式', audio: '音频', video: '视频' }
+export const animationEffects = { fade_in: '淡入', fly_in: '向上飞入', emphasis: '缩放强调', fade_out: '淡出' }
 export const layouts = { blank: '空白', cover: '封面', body: '标题与正文', two: '双栏', steps: '步骤', table: '表格' }
 export const shapes = {
   rect: '矩形', round: '圆角矩形', ellipse: '椭圆', triangle: '三角形', diamond: '菱形', hexagon: '六边形',

@@ -6,7 +6,7 @@ from io import StringIO
 from typing import Annotated, Literal
 from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field, StringConstraints, ValidationError
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import defer
@@ -15,8 +15,10 @@ from .ai import generate
 from .auth import DB, Teacher, course_access
 from .documents import WORD_EXTENSIONS
 from .lessons import Source, Title, lesson_sources, owned_lesson
-from .models import Course, PresentationSuggestion, TeachingPresentation as Presentation, TeachingPresentationTemplate as Template, identifier, now
+from .models import (Course, PresentationMedia, PresentationSuggestion, TeachingPresentation as Presentation,
+                     TeachingPresentationTemplate as Template, identifier, now)
 from .presentation_document import ChartKind, ChartValue, Deck, Element, Layout, Slide, TitleCell, deck_pptx
+from .presentation_media import list_media, media_for_deck, media_view, stream_media, upload_media
 from .presentation_templates import builtin, compose_slide, make_slide, template_keys
 from .resources import owned_resource
 from .word import convert_office_document
@@ -158,8 +160,10 @@ def verify_sources(db, user, course_id, sources):
 
 
 def store(db, user, data, document):
+    deck = Deck.model_validate(document)
+    media_for_deck(db, user, data.course_id, deck)
     row = Presentation(owner_id=user.id, course_id=data.course_id, title=data.title,
-                       document=Deck.model_validate(document).model_dump())
+                       document=deck.model_dump())
     db.add(row)
     db.commit()
     return row_view(row, True)
@@ -430,6 +434,8 @@ def generate_presentation(data: GenerateDeck, db: DB, user: Teacher):
             if data.template_id and data.template_id not in template_keys() and slots and index < len(template["slides"]) and not chart:
                 slide = Slide.model_validate(example).model_copy(deep=True)
                 slide.elements = [element for element in slide.elements if element.kind != "chart"]
+                retained = {element.id for element in slide.elements}
+                slide.animations = [entry for entry in slide.animations if entry.target_id in retained]
                 title = next((element for element in slide.elements if element.role == "title"), None)
                 if title:
                     title.text = page.title
@@ -463,6 +469,26 @@ def get_presentation(key: str, db: DB, user: Teacher):
     return row_view(owned(db, user, key), True)
 
 
+@router.get("/presentations/{key}/media")
+def presentation_media_list(key: str, db: DB, user: Teacher):
+    row = owned(db, user, key)
+    return [media_view(asset) for asset in list_media(db, user, row.course_id)]
+
+
+@router.post("/presentations/{key}/media", status_code=201)
+def upload_presentation_media(key: str, kind: Literal["audio", "video"], file: UploadFile, db: DB, user: Teacher):
+    return upload_media(db, user, owned(db, user, key).course_id, kind, file)
+
+
+@router.get("/presentations/{key}/media/{media_id}")
+def read_presentation_media(key: str, media_id: str, db: DB, user: Teacher):
+    row = owned(db, user, key)
+    asset = db.get(PresentationMedia, media_id)
+    if not asset or asset.owner_id != user.id or asset.course_id != row.course_id:
+        raise HTTPException(404, "音视频文件不存在")
+    return stream_media(asset)
+
+
 @router.post("/presentations/{key}/formula")
 def check_formula(key: str, data: PresentationFormula, db: DB, user: Teacher):
     owned(db, user, key)
@@ -476,6 +502,7 @@ def check_formula(key: str, data: PresentationFormula, db: DB, user: Teacher):
 @router.put("/presentations/{key}")
 def save_presentation(key: str, data: SaveDeck, db: DB, user: Teacher):
     row = owned(db, user, key)
+    media_for_deck(db, user, row.course_id, data.document)
     old_sources = row.document["sources"]
     verify_sources(db, user, row.course_id, [source for source in data.document.sources if source.model_dump() not in old_sources])
     result = db.execute(update(Presentation).where(Presentation.id == key, Presentation.revision == data.revision)
@@ -507,17 +534,20 @@ def save_as_template(key: str, data: SaveTemplate, db: DB, user: Teacher):
     document.sources = []
     for slide in document.slides:
         slide.citations = []
+        removed = {"audio", "video", "image", "formula"} if data.layout_only else {"audio", "video"}
+        slide.elements = [item for item in slide.elements if item.kind not in removed]
+        remaining = {item.id for item in slide.elements}
+        slide.animations = [entry for entry in slide.animations if entry.target_id in remaining]
         if not data.layout_only:
             continue
         slide.notes = ""
-        slide.elements = [item for item in slide.elements if item.kind not in {"image", "formula"}]
         for item in slide.elements:
             if item.kind == "text":
                 item.text = ""
             elif item.kind == "table":
                 item.rows = [["" for _ in row] for row in item.rows]
             elif item.kind == "chart":
-                item.labels = [f"样例 {i + 1}" for i in range(len(item.labels))]
+                item.labels = [str(i + 1) if item.chart == "scatter" else f"样例 {i + 1}" for i in range(len(item.labels))]
                 item.values = [1 for _ in item.labels]
     record = Template(owner_id=user.id, title=data.title, document=document.model_dump())
     db.add(record)
@@ -586,7 +616,9 @@ def read_suggestion(key: str, candidate_id: str, db: DB, user: Teacher):
 @router.get("/presentations/{key}/export/{format}")
 def export_presentation(key: str, format: Literal["pptx", "pdf"], db: DB, user: Teacher, inline: bool = False):
     row = owned(db, user, key)
-    content = deck_pptx(row.title, Deck.model_validate(row.document), for_pdf=format == "pdf")
+    deck = Deck.model_validate(row.document)
+    media = media_for_deck(db, user, row.course_id, deck)
+    content = deck_pptx(row.title, deck, for_pdf=format == "pdf", media=media)
     if format == "pdf":
         content = convert_office_document(content, "pptx", "pdf:impress_pdf_Export", label="演示文稿")
     disposition = "inline" if inline and format == "pdf" else "attachment"

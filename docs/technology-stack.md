@@ -75,6 +75,16 @@ Pillow `>=12.2,<14` 用于服务器端验证 PNG、JPEG 的文件格式与解码
 
 沿用现有部署依赖。Chrome 验证模板末页预览、折线和散点编辑流程、形状与放映。python-pptx 复读八种原生图表、坐标和数值，LibreOffice Impress 验证八页图表 PDF。真实模型按教师给定的三项读数生成英文折线图，保存并导出。
 
+### 2026-11-15｜演示文稿音视频与对象级动画
+
+首版范围已确认。音视频支持教师上传 MP4（H.264，包含音轨时要求 AAC）和 MP3。媒体字节存放在数据目录，数据库维护课程、上传者和文件信息，课件保存媒体引用。浏览器使用原生播放控件和 Starlette FileResponse 的范围请求。与外链播放相比，嵌入模式支持教室离线放映，PPTX 使用 python-pptx 1.0.2 和 Office Open XML 媒体关系，PDF 保留静态媒体标记。自定义模板可以跨课程复用，保存模板时移除课程媒体与其引用。[Microsoft 媒体格式](https://support.microsoft.com/en-us/powerpoint/video-and-audio-file-formats-supported-in-powerpoint) · [Starlette 响应](https://starlette.dev/responses/) · [python-pptx 媒体结构](https://python-pptx.readthedocs.io/en/latest/dev/analysis/shp-movie.html)
+
+服务器通过 ffprobe 检查实际容器和编解码器，避免依赖扩展名和浏览器上报的 MIME。部署使用 PATH 中的 ffprobe 或通过 `DIANOIA_FFPROBE` 指定路径，本机版本为 7.0.2。只对本地上传暂存文件进行探测，限制探测时间，保留原始字节用于下载和嵌入。[ffprobe 官方文档](https://ffmpeg.org/ffprobe.html)
+
+每页保存有序动画序列，支持淡入、飞入、强调和淡出，支持点击与上一动画结束后触发。网页放映复用现有 Konva 画布和公式、媒体覆盖层，由同一序列推进。PPTX 使用原生时序。PDF 输出静态全页供印刷。验收覆盖网页点击推进、返回重放、媒体播放及拖动进度，以及 PowerPoint 和 WPS 的播放兼容性。课件中使用动画以分步展示和强调为主。[PowerPoint 时序结构](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.presentation.timing) · [多媒体学习元分析](https://doi.org/10.1016/j.edurev.2025.100730)
+
+已在 Chrome 验证上传、媒体播放和定位进度、动画执行及重新进入页面。PowerPoint 16 和 WPS 12 复读了导出文件中的音频、视频、动画类型与触发方式。LibreOffice 导出的 PDF 已核对媒体标记。单个媒体上限 32 MB，单份课件按不同媒体文件计总量上限 96 MB。
+
 ## 待验证和待选型
 
 - 资料向量检索的候选为 PostgreSQL + pgvector 与 Qwen3-Embedding。以真实中文课程样本比较证据召回、章节切分与引用页码后再确认。
