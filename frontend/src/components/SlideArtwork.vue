@@ -5,7 +5,7 @@ import { Arrow as VArrow, Ellipse as VEllipse, Group as VGroup, Image as VImage,
 import { labels, shapePolygons } from '../presentation'
 import SlideChart from './SlideChart.vue'
 
-const props = defineProps({ item: { type: Object, required: true }, editable: Boolean, motion: Object })
+const props = defineProps({ item: { type: Object, required: true }, editable: Boolean })
 const emit = defineEmits(['pick', 'edit', 'moveStart', 'move', 'moveEnd'])
 const picture = shallowRef(null)
 const polygon = computed(() => shapePolygons[props.item.shape]?.map((value, i) => value * (i % 2 ? props.item.height : props.item.width)))
@@ -26,9 +26,7 @@ watch(() => props.item.image, (source, _, dispose) => {
 
 const config = computed(() => {
   const { id, x, y, rotation, width, height, locked } = props.item
-  const { opacity = 1, dy = 0, scale = 1 } = props.motion || {}
-  return { id, name: labels[props.item.kind], x: x + width * (1 - scale) / 2, y: y + dy + height * (1 - scale) / 2,
-    rotation, width, height, opacity, scaleX: scale, scaleY: scale,
+  return { id, name: labels[props.item.kind], x, y, rotation, width, height,
     draggable: props.editable && !locked, listening: props.editable,
     onMousedown: pick, onTap: pick, onDblclick: edit, onDbltap: edit,
     onDragstart: dragStart, onDragmove: dragMove, onDragend: dragEnd }

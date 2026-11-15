@@ -1,9 +1,9 @@
 <script setup>
-import { ArrowDown, ArrowUp, Play, Plus, Trash2, X } from 'lucide-vue-next'
+import { ArrowDown, ArrowUp, Play, Plus, Square, Trash2, X } from 'lucide-vue-next'
 import { animationEffects, labels } from '../presentation'
 
-const props = defineProps({ slide: { type: Object, required: true }, selection: String, canAdd: Boolean })
-const emit = defineEmits(['add', 'update', 'remove', 'move', 'select', 'preview', 'close'])
+const props = defineProps({ slide: { type: Object, required: true }, selection: String, canAdd: Boolean, previewing: Boolean })
+const emit = defineEmits(['add', 'update', 'remove', 'move', 'select', 'preview', 'stop-preview', 'close'])
 
 function title(id) {
   const item = props.slide.elements.find((object) => object.id === id)
@@ -31,6 +31,10 @@ function duration(entry, event) {
       <p v-if="selection" class="muted">已选中 {{ selection }}</p>
       <p v-else class="muted">点选画布上的对象即可添加动画</p>
       <button v-if="selection" type="button" class="button secondary" :disabled="!canAdd" @click="emit('add')"><Plus :size="16" /> 添加淡入</button>
+      <button v-if="slide.animations?.length" type="button" class="button secondary"
+        @click="previewing ? emit('stop-preview') : emit('preview')">
+        <Square v-if="previewing" :size="14" /><Play v-else :size="14" /> {{ previewing ? '停止预览' : '预览本页' }}
+      </button>
     <article v-for="(entry,index) in slide.animations" :key="entry.id" class="presentation-animation-row" :aria-label="'动画 ' + (index + 1)">
       <div class="presentation-animation-heading">
         <button type="button" class="button subtle" :title="title(entry.target_id)" @click="emit('select',entry.target_id)">

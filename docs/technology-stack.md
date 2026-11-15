@@ -85,6 +85,10 @@ Pillow `>=12.2,<14` 用于服务器端验证 PNG、JPEG 的文件格式与解码
 
 已在 Chrome 验证上传、媒体播放和定位进度、动画执行及重新进入页面。PowerPoint 16 和 WPS 12 复读了导出文件中的音频、视频、动画类型与触发方式。LibreOffice 导出的 PDF 已核对媒体标记。单个媒体上限 32 MB，单份课件按不同媒体文件计总量上限 96 MB。
 
+### 2026-11-15｜网页对象动画播放
+
+参考 PPTist 对目标对象直接施加效果、完成后推进队列的思路。Dianoia 在 Vue 3、Konva 10.9.1 和 vue-konva 4.0.1 上使用浏览器 `requestAnimationFrame` 计算进度，通过 Konva 批量绘制和 CSS 自定义属性更新对象。预览和网页放映共用队列与效果计算。系统开启减少动态效果时，飞入和缩放强调使用透明度变化。前端依赖及课件动画数据格式沿用原有版本。[PPTist 对象预览](https://github.com/pipipi-pikachu/PPTist/blob/6907580cce33914a4c58be03e13ac0c332d8b5e9/src/views/Editor/Toolbar/ElementAnimationPanel.vue) · [PPTist 放映调度](https://github.com/pipipi-pikachu/PPTist/blob/6907580cce33914a4c58be03e13ac0c332d8b5e9/src/views/Screen/hooks/useExecPlay.ts)
+
 ## 待验证和待选型
 
 - 资料向量检索的候选为 PostgreSQL + pgvector 与 Qwen3-Embedding。以真实中文课程样本比较证据召回、章节切分与引用页码后再确认。

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, ArrowDown, ArrowUp, BarChart3, ChartArea, ChartBar, ChartLine, ChartPie, ChartScatter,
   Copy, Donut, Download, Film, FileImage, Play, Plus, Radar, Redo2, Save, Shapes, Sigma, Sparkles, Table2, Trash2, Type, Undo2, WandSparkles, X } from 'lucide-vue-next'
@@ -50,11 +50,13 @@ const pdfPage = ref(1)
 const play = ref(false)
 const playIndex = ref(0)
 const playSurface = ref(null)
+const playerCanvas = ref(null)
+const editorCanvas = ref(null)
 const animationPanel = ref(false)
 const playback = usePresentationPlayback()
 const previewPlayback = usePresentationPlayback()
-const previewingAnimation = ref(false)
-const { states: motion, cursor: animationIndex, running: animating } = playback
+const { running: previewingAnimation } = previewPlayback
+const { pending: pendingAnimation, running: animating } = playback
 const busy = ref(false)
 const loading = ref(true)
 const error = ref('')
@@ -72,10 +74,13 @@ const canAddAnimation = computed(() => animationTargets.value.length > 0 &&
   (page.value?.animations?.length || 0) + animationTargets.value.length <= 50)
 const pageNumber = computed(() => document.value.slides.findIndex((slide) => slide.id === active.value) + 1)
 const playingPage = computed(() => document.value?.slides[playIndex.value])
-const pendingAnimation = computed(() => animationIndex.value < (playingPage.value?.animations?.length || 0))
 const citeNames = computed(() => Object.fromEntries(references.value.map((resource) => [resource.id, resource.title])))
 const snapshot = () => ({ title: row.value.title, document: clone(document.value), active: active.value })
-watch(previewPlayback.running, (running) => { if (!running) previewingAnimation.value = false })
+watch(playerCanvas, async (canvas) => {
+  // vue-konva attaches group nodes in its mounted hooks, after Vue sets the component ref.
+  await nextTick()
+  if (canvas && canvas === playerCanvas.value && play.value) playback.enter(playingPage.value, canvas)
+}, { flush: 'post' })
 
 onMounted(async () => {
   window.addEventListener('keydown', shortcuts)
@@ -98,7 +103,7 @@ onMounted(async () => {
   } catch (failure) { error.value = failure.message }
   finally { loading.value = false }
 })
-onUnmounted(() => {
+onBeforeUnmount(() => {
   playback.stop()
   previewPlayback.stop()
   window.removeEventListener('keydown', shortcuts)
@@ -110,13 +115,13 @@ function leave(event) { if (dirty.value) { event.preventDefault(); event.returnV
 
 function activate(id) {
   previewPlayback.stop()
-  previewingAnimation.value = false
   active.value = id
   selected.value = []
   notes.value = page.value?.notes || ''
 }
 function change(operation) {
   if (busy.value) return
+  previewPlayback.stop()
   const before = snapshot()
   operation()
   history.value = [...history.value.slice(-29), before]
@@ -198,6 +203,7 @@ function openAnimations() {
   toggleTool('animation')
 }
 function closeAnimations() {
+  previewPlayback.stop()
   if (toolMenu.value === 'animation') toolMenu.value = ''
   animationPanel.value = false
 }
@@ -214,12 +220,13 @@ function addAnimation(effect = 'fade_in') {
   if (entries.length === 1) previewAnimation(entries[0])
 }
 function previewAnimation(entry) {
-  previewingAnimation.value = true
-  previewPlayback.enter({ elements: page.value.elements, animations: [{ ...entry, trigger: 'after' }] })
+  previewPlayback.enter(page.value, editorCanvas.value, { entries: entry ? [entry] : page.value.animations, isPreview: true })
 }
 function updateAnimation(id, changes) {
   const entry = page.value.animations.find((item) => item.id === id)
-  if (entry) change(() => Object.assign(entry, changes))
+  if (!entry) return
+  change(() => Object.assign(entry, changes))
+  if (changes.effect) previewAnimation(entry)
 }
 function removeAnimation(id) {
   change(() => { page.value.animations = page.value.animations.filter((entry) => entry.id !== id) })
@@ -547,10 +554,8 @@ async function saveDialog() {
 function startPlay(fromBeginning) {
   toolMenu.value = ''
   previewPlayback.stop()
-  previewingAnimation.value = false
   playIndex.value = fromBeginning ? 0 : pageNumber.value - 1
   play.value = true
-  playback.enter(playingPage.value)
   nextTick(() => playSurface.value?.focus())
 }
 function closePlay() {
@@ -561,8 +566,8 @@ function step(delta) {
   if (delta > 0 && playback.advance()) return
   const nextPage = Math.max(0, Math.min(document.value.slides.length - 1, playIndex.value + delta))
   if (nextPage === playIndex.value) return
+  playback.stop()
   playIndex.value = nextPage
-  playback.enter(playingPage.value)
 }
 function shortcuts(event) {
   if (!page.value || event.isComposing) return
@@ -575,7 +580,10 @@ function shortcuts(event) {
     if (['ArrowLeft','ArrowUp','PageUp'].includes(event.key)) { event.preventDefault(); step(-1) }
     return
   }
-  if (event.key === 'Escape' && toolMenu.value) toolMenu.value = ''
+  if (event.key === 'Escape') {
+    if (toolMenu.value) toolMenu.value = ''
+    previewPlayback.stop()
+  }
   if (modal.value || pdf.value || busy.value || event.target.closest?.('input, textarea, select, [contenteditable]')) return
   const primary = event.ctrlKey || event.metaKey
   const key = event.key.toLowerCase()
@@ -726,8 +734,7 @@ function shortcuts(event) {
           </div>
         </aside>
         <section class="presentation-center" aria-label="课件画布">
-          <SlideCanvas :slide="page" :selected="selected" :zoom="zoom" :editable="!previewingAnimation"
-            :motion="previewingAnimation ? previewPlayback.states.value : undefined"
+          <SlideCanvas ref="editorCanvas" :slide="page" :selected="selected" :zoom="zoom" editable :previewing="previewingAnimation"
             @select="select" @edit="editContent" @move="setPositions" @transform="setPositions" />
           <div class="presentation-workspace-status"><span>第 {{ pageNumber }} 页 / {{ document.slides.length }}</span>
             <button class="button subtle" @click="openDialog('cite')">本页引用<template v-if="page.citations.length"> · {{ page.citations.length }}</template></button>
@@ -741,7 +748,8 @@ function shortcuts(event) {
           </div>
           <label class="presentation-notes">讲者备注<textarea v-model="notes" rows="3" maxlength="8000" @input="dirty = true" @blur="commitNotes" /></label>
         </section>
-        <SlideAnimations v-if="animationPanel" :slide="page" :selection="animationSelection" :can-add="canAddAnimation" @close="closeAnimations"
+        <SlideAnimations v-if="animationPanel" :slide="page" :selection="animationSelection" :can-add="canAddAnimation"
+          :previewing="previewingAnimation" @close="closeAnimations" @stop-preview="previewPlayback.stop"
           @add="addAnimation()" @update="updateAnimation" @remove="removeAnimation" @move="moveAnimation"
           @select="select" @preview="previewAnimation" />
         <SlideInspector v-else :slide="page" :item="item" :selected="selected" @change="setItem" @select="select" @edit="editContent" @align="alignSelection"
@@ -752,7 +760,7 @@ function shortcuts(event) {
       <Teleport to="body">
         <div v-if="play" class="presentation-player" role="dialog" aria-modal="true" aria-label="放映">
           <div ref="playSurface" class="presentation-play-surface" role="region" tabindex="0" aria-label="放映画面" @click="step(1)">
-            <SlideCanvas :key="playIndex" :slide="playingPage" :motion="motion" :media-endpoint="endpoint" :class="'presentation-transition-' + playingPage.transition" />
+            <SlideCanvas ref="playerCanvas" :key="playIndex" :slide="playingPage" :media-endpoint="endpoint" :class="'presentation-transition-' + playingPage.transition" />
           </div>
           <div class="presentation-play-controls"><button class="button secondary" :disabled="!playIndex" @click="step(-1)">上一页</button>
             <span>{{ playIndex + 1 }} / {{ document.slides.length }}</span>

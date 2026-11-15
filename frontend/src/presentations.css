@@ -52,6 +52,9 @@ dialog.presentation-preview-dialog.dialog-wide { width:min(860px, calc(100% - 24
 .presentation-center { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .presentation-canvas { display: grid; place-items: center; flex: 1; overflow: auto; min-height: 0; min-width: 0; padding: 12px; background: var(--raised); }
 .presentation-board { position:relative; background: white; box-shadow: 0 3px 20px #11182720; }
+.presentation-is-previewing .presentation-board { pointer-events:none; }
+.presentation-object-motion { opacity:var(--slide-motion-opacity, 1); transform:translateY(var(--slide-motion-y, 0px))
+  rotate(var(--slide-object-rotation)) var(--slide-motion-center, translate(0px)) scale(var(--slide-motion-scale, 1)); }
 .presentation-formula-overlay { position:absolute; inset:0; width:960px; height:540px; transform-origin:top left; overflow:hidden; pointer-events:none; }
 .presentation-media-overlay { position:absolute; inset:0; width:960px; height:540px; transform-origin:top left; overflow:hidden; pointer-events:none; }
 .presentation-media-player { position:absolute; transform-origin:top left; display:grid; place-items:center; pointer-events:auto; overflow:hidden; }

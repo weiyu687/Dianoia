@@ -6,8 +6,7 @@ import SlideMedia from './SlideMedia.vue'
 import { height, width } from '../presentation'
 
 const props = defineProps({ slide: { type: Object, required: true }, selected: { type: Array, default: () => [] },
-  zoom: { type: Number, default: 1 }, editable: Boolean, mediaEndpoint: String,
-  motion: { type: Object, default: () => ({}) } })
+  zoom: { type: Number, default: 1 }, editable: Boolean, previewing: Boolean, mediaEndpoint: String })
 const emit = defineEmits(['select', 'edit', 'move', 'transform'])
 const SlideFormula = defineAsyncComponent(() => import('./SlideFormula.vue'))
 const viewport = ref(null)
@@ -21,6 +20,7 @@ const guides = ref({ x: null, y: null })
 const equations = computed(() => props.slide.elements.filter((item) => item.kind === 'formula')
   .map((item) => ({ ...item, ...moving.value[item.id] })))
 const media = computed(() => props.mediaEndpoint ? props.slide.elements.filter((item) => item.media_id) : [])
+const overlays = new Map()
 let observer, drag
 onMounted(() => {
   observer = new ResizeObserver(([entry]) => {
@@ -30,7 +30,7 @@ onMounted(() => {
   observer.observe(viewport.value)
 })
 onUnmounted(() => observer?.disconnect())
-watch(() => [props.selected, props.slide, props.editable], async () => {
+watch(() => [props.selected, props.slide, props.editable, props.previewing], async () => {
   await nextTick()
   const handle = transformer.value?.getNode()
   const groupLayer = layer.value?.getNode()
@@ -38,9 +38,53 @@ watch(() => [props.selected, props.slide, props.editable], async () => {
   const ids = new Set(props.selected)
   const editable = groupLayer.getChildren().filter((node) => ids.has(node.id()) &&
     !props.slide.elements.find((item) => item.id === node.id())?.locked)
-  handle.nodes(editable)
+  handle.nodes(props.previewing ? [] : editable)
   handle.getLayer()?.batchDraw()
 }, { deep: true, immediate: true })
+
+function setOverlay(id, element) {
+  if (element) overlays.set(id, element)
+  else overlays.delete(id)
+}
+
+function bindMotion(items) {
+  const groupLayer = layer.value.getNode()
+  const nodes = new Map(groupLayer.getChildren().map((node) => [node.id(), node]))
+  const targets = new Map(items.map((item) => [item.id, { item, node: nodes.get(item.id) }]))
+
+  function set(id, { opacity, dy, scale: factor }) {
+    const { item, node } = targets.get(id)
+    const { x, y, width, height, rotation } = item
+    const radians = rotation * Math.PI / 180
+    const dx = width * (1 - factor) / 2
+    const localY = height * (1 - factor) / 2
+    node?.setAttrs({ x: x + dx * Math.cos(radians) - localY * Math.sin(radians),
+      y: y + dy + dx * Math.sin(radians) + localY * Math.cos(radians),
+      scaleX: factor, scaleY: factor, opacity })
+    const overlay = overlays.get(id)
+    if (overlay) {
+      overlay.style.setProperty('--slide-motion-opacity', opacity)
+      overlay.style.setProperty('--slide-motion-y', dy + 'px')
+      overlay.style.setProperty('--slide-motion-scale', factor)
+      overlay.style.setProperty('--slide-motion-center', `translate(${dx}px, ${localY}px)`)
+      overlay.style.visibility = opacity ? '' : 'hidden'
+      if (!opacity) overlay.querySelector('video, audio')?.pause()
+    }
+    groupLayer.batchDraw()
+  }
+
+  function reset() {
+    for (const [id, { item, node }] of targets) {
+      node?.setAttrs({ x: item.x, y: item.y, scaleX: 1, scaleY: 1, opacity: 1 })
+      overlays.get(id)?.removeAttribute('style')
+    }
+    groupLayer.batchDraw()
+  }
+
+  return { set, reset }
+}
+
+defineExpose({ bindMotion })
 
 function pick(id, event) { emit('select', id, !!(event?.shiftKey || event?.ctrlKey || event?.metaKey)) }
 function dragStart(id, event) {
@@ -102,24 +146,28 @@ function empty(event) { if (!event.target.id()) emit('select', '', false) }
 </script>
 
 <template>
-  <div ref="viewport" class="presentation-canvas" :class="{ 'presentation-playing': !editable }">
+  <div ref="viewport" class="presentation-canvas" :class="{ 'presentation-is-previewing': previewing }">
     <div class="presentation-board" :style="{ width: (scale * width) + 'px', height: (scale * height) + 'px' }">
       <VStage :config="{ width: scale * width, height: scale * height, onMousedown: empty, onTap: empty }">
         <VLayer ref="layer" :config="{ scaleX: scale, scaleY: scale }">
           <VRect :config="{ width, height, fill: slide.background }" />
-          <SlideArtwork v-for="item in slide.elements" :key="item.id" :item="item" :editable="editable" :motion="motion[item.id]"
+          <SlideArtwork v-for="item in slide.elements" :key="item.id" :item="item" :editable="editable"
             @pick="pick" @edit="emit('edit', $event)" @move-start="dragStart" @move="dragMove" @move-end="dragEnd" />
           <VLine v-if="guides.x !== null" :config="{ points:[guides.x,0,guides.x,height], stroke:'#7974ff', strokeWidth:1, dash:[5,4], listening:false }" />
           <VLine v-if="guides.y !== null" :config="{ points:[0,guides.y,width,guides.y], stroke:'#7974ff', strokeWidth:1, dash:[5,4], listening:false }" />
-          <VTransformer v-if="editable" ref="transformer" :config="{ flipEnabled:false, rotateEnabled:selected.length === 1 &&
+          <VTransformer v-if="editable" ref="transformer" :config="{ visible:!previewing, flipEnabled:false, rotateEnabled:selected.length === 1 &&
             !slide.elements.some((item) => selected.includes(item.id) && ['table','chart'].includes(item.kind)),
             borderStroke:'#6578ed', anchorStroke:'#6578ed', anchorSize:8, anchorCornerRadius:2,
             boundBoxFunc: (previous, next) => next.width < 8 || next.height < 8 ? previous : next,
             onTransformend: transform }" />
         </VLayer>
       </VStage>
-      <SlideFormula v-for="item in equations" :key="item.id" :item="item" :scale="scale" :motion="motion[item.id]" />
-      <SlideMedia v-for="item in media" :key="item.id" :item="item" :scale="scale" :motion="motion[item.id]" :endpoint="mediaEndpoint" />
+      <div v-for="item in equations" :key="item.id" :ref="(element) => setOverlay(item.id, element)">
+        <SlideFormula :item="item" :scale="scale" />
+      </div>
+      <div v-for="item in media" :key="item.id" :ref="(element) => setOverlay(item.id, element)">
+        <SlideMedia :item="item" :scale="scale" :endpoint="mediaEndpoint" />
+      </div>
     </div>
   </div>
 </template>
