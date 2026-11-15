@@ -198,6 +198,7 @@ class WorkflowTest(unittest.TestCase):
             template = Deck.model_validate(builtin(key)["document"])
             self.assertGreaterEqual(len(template.slides), 8)
             self.assertTrue(any(item.kind == "chart" for slide in template.slides for item in slide.elements))
+            self.assertFalse(any(item.locked for slide in template.slides for item in slide.elements if item.kind == "shape"))
         self.assertEqual(len(client.get(templates).raise_for_status().json()), len(template_keys()))
         source = {"resource_id": resource_id, "start": 2, "end": 2}
         outline = [{"title": title} for title in ("隔离级别", "概念", "实验")]

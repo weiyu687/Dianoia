@@ -8,6 +8,26 @@ export const shapes = {
   arrow: '右箭头', arrowLeft: '左箭头', arrowUp: '上箭头', arrowDown: '下箭头', chevron: '燕尾箭头',
   line: '水平线', connector: '直线', connectorArrow: '箭头线',
 }
+export const shapePolygons = {
+  triangle: [.5,0,1,1,0,1],
+  diamond: [.5,0,1,.5,.5,1,0,.5],
+  hexagon: [.24,0,.76,0,1,.5,.76,1,.24,1,0,.5],
+  parallelogram: [.2,0,1,0,.8,1,0,1],
+  trapezoid: [.22,0,.78,0,1,1,0,1],
+  chevron: [0,0,.72,0,1,.5,.72,1,0,1,.3,.5],
+  pentagon: [.5,0,1,.38,.81,1,.19,1,0,.38],
+  arrow: [0,.25,.58,.25,.58,0,1,.5,.58,1,.58,.75,0,.75],
+  arrowLeft: [1,.25,.42,.25,.42,0,0,.5,.42,1,.42,.75,1,.75],
+  arrowUp: [.25,1,.25,.42,0,.42,.5,0,1,.42,.75,.42,.75,1],
+  arrowDown: [.25,0,.25,.58,0,.58,.5,1,1,.58,.75,.58,.75,0],
+  star: [.5,0,.62,.35,1,.38,.71,.61,.8,1,.5,.77,.2,1,.29,.61,0,.38,.38,.35],
+  callout: [0,0,1,0,1,.76,.43,.76,.22,1,.22,.76,0,.76],
+}
+export const shapeGroups = {
+  矩形: ['rect', 'round'],
+  常用形状: ['ellipse', 'triangle', 'diamond', 'hexagon', 'pentagon', 'parallelogram', 'trapezoid', 'star', 'callout'],
+  箭头: ['arrow', 'arrowLeft', 'arrowUp', 'arrowDown', 'chevron'],
+}
 export const chartTypes = { column: '柱状图', bar: '条形图', line: '折线图', area: '面积图',
   scatter: '散点图', pie: '饼图', donut: '环形图', radar: '雷达图' }
 export const transitions = { none: '无', fade: '淡入', push: '推入' }

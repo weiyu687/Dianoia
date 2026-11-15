@@ -132,7 +132,7 @@ def compose_slide(title, layout, theme, points, *, summary="", sections=(), code
     items = slide["elements"]
 
     def box(x, y, w, h, fill, radius=False):
-        items.append(graphic("shape", x, y, w, h, fill=fill, shape="round" if radius else "rect", locked=True))
+        items.append(graphic("shape", x, y, w, h, fill=fill, shape="round" if radius else "rect"))
 
     def text(x, y, w, h, value, size, *, color=ink, bold=False, role=None, font="Microsoft YaHei"):
         if value:
@@ -246,25 +246,25 @@ def make_slide(title="", layout="blank", palette=("#17375d", "#166b73"), points=
     if layout == "cover":
         slide["background"] = ink
         items.extend([
-            graphic("shape", 72, 145, 72, 8, fill="#d2b567", locked=True),
+            graphic("shape", 72, 145, 72, 8, fill="#d2b567"),
             text("text", 72, 185, 812, 128, text=title, size=46, color="#ffffff", bold=True, role="title"),
             text("text", 73, 342, 800, 78, text="\n".join(points), size=22, color="#e0e8f0", role="body"),
         ])
         return slide
     items.extend([
-        graphic("shape", 55, 112, 850, 8, fill=accent, locked=True),
+        graphic("shape", 55, 112, 850, 8, fill=accent),
         text("text", 55, 40, 850, 70, text=title, size=36, color=ink, bold=True, role="title"),
     ])
     if layout == "two":
         for index in range(2):
             x = 55 + index * 440
-            items.append(graphic("shape", x, 152, 410, 315, fill="#edf2f7", locked=True))
+            items.append(graphic("shape", x, 152, 410, 315, fill="#edf2f7"))
             body = "\n".join(points[index::2])
             items.append(text("text", x + 20, 175, 370, 260, text=body, size=24, color=ink, role="body"))
     elif layout == "steps":
         for index, body in enumerate(points[:4]):
             y = 149 + index * 80
-            items.extend([graphic("shape", 58, y + 6, 8, 43, fill=accent, locked=True),
+            items.extend([graphic("shape", 58, y + 6, 8, 43, fill=accent),
                           text("text", 84, y, 810, 65, text=f"{index + 1:02d}   {body}", size=24, color=ink, role="body")])
     elif layout == "table":
         items.extend([text("text", 56, 142, 848, 70, text="\n".join(points), size=22, color=ink, role="body"),

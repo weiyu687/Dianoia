@@ -1,7 +1,8 @@
 <script setup>
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, shallowRef } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, ArrowDown, ArrowUp, BarChart3, Copy, Download, FileImage, Play, Plus, Redo2, Save, Shapes, Sigma, Sparkles, Table2, Trash2, Type, Undo2, X } from 'lucide-vue-next'
+import { ArrowLeft, ArrowDown, ArrowUp, BarChart3, ChartArea, ChartBar, ChartLine, ChartPie, ChartScatter,
+  Copy, Donut, Download, FileImage, Play, Plus, Radar, Redo2, Save, Shapes, Sigma, Sparkles, Table2, Trash2, Type, Undo2, X } from 'lucide-vue-next'
 import { api, download } from '../api'
 import Modal from '../components/Modal.vue'
 import MapSources from '../components/MapSources.vue'
@@ -9,7 +10,8 @@ import PdfViewer from '../components/PdfViewer.vue'
 import SlideCanvas from '../components/SlideCanvas.vue'
 import SlideInspector from '../components/SlideInspector.vue'
 import SlideThumbnail from '../components/SlideThumbnail.vue'
-import { chartTypes, clone, height, layouts, newElement, newSlide, readableInk, shapes, slideTitle, uid, width } from '../presentation'
+import SlideShapeIcon from '../components/SlideShapeIcon.vue'
+import { chartTypes, clone, height, layouts, newElement, newSlide, readableInk, shapeGroups, shapes, slideTitle, uid, width } from '../presentation'
 import '../presentations.css'
 
 const route = useRoute()
@@ -25,6 +27,8 @@ const fileInput = ref(null)
 const dragPage = ref('')
 const nextLayout = ref('body')
 const toolMenu = ref('')
+const chartIcons = { column: BarChart3, bar: ChartBar, line: ChartLine, area: ChartArea, scatter: ChartScatter,
+  pie: ChartPie, donut: Donut, radar: Radar }
 const symbolGroup = ref('数学')
 const symbols = {
   数学: Array.from('±×÷≈≠≤≥∞√∑∏∫∂∇∈∉⊂∪∩∅∀∃'),
@@ -193,6 +197,11 @@ function insertSymbol(symbol) {
 }
 function applyBackground() {
   change(() => { for (const slide of document.value.slides) slide.background = page.value.background })
+}
+function unlockShapes() {
+  change(() => {
+    for (const element of page.value.elements) if (element.kind === 'shape') element.locked = false
+  })
 }
 function applyFont(font) {
   change(() => {
@@ -540,24 +549,31 @@ function shortcuts(event) {
             <button class="button subtle" @click="addObject('text', { color: readableInk(page.background) })"><Type :size="16" /> 文本</button>
             <div class="presentation-menu-wrap">
               <button class="button subtle" :aria-expanded="toolMenu === 'shape'" @click="toggleTool('shape')"><Shapes :size="16" /> 形状</button>
-              <div v-if="toolMenu === 'shape'" class="panel presentation-menu presentation-menu-grid">
-                <button v-for="(label, key) in shapes" v-show="!['connector','connectorArrow','line'].includes(key)" type="button"
-                  :key="key" class="button subtle" @click="insertShape(key)">{{ label }}</button>
+              <div v-if="toolMenu === 'shape'" class="panel presentation-menu presentation-shape-menu">
+                <section v-for="(keys, label) in shapeGroups" :key="label" :aria-label="label">
+                  <div class="presentation-picker-heading">{{ label }}</div>
+                  <div class="presentation-shape-options">
+                    <button v-for="key in keys" :key="key" type="button" class="button subtle icon-only"
+                      :aria-label="shapes[key]" :title="shapes[key]" @click="insertShape(key)"><SlideShapeIcon :shape="key" /></button>
+                  </div>
+                </section>
               </div>
             </div>
             <div class="presentation-menu-wrap">
               <button class="button subtle" :aria-expanded="toolMenu === 'line'" @click="toggleTool('line')">╱ 线条</button>
               <div v-if="toolMenu === 'line'" class="panel presentation-menu">
-                <button type="button" class="button subtle" @click="insertShape('connector')">直线</button>
-                <button type="button" class="button subtle" @click="insertShape('connectorArrow')">箭头线</button>
+                <button type="button" class="button subtle" @click="insertShape('connector')"><SlideShapeIcon shape="connector" /> 直线</button>
+                <button type="button" class="button subtle" @click="insertShape('connectorArrow')"><SlideShapeIcon shape="connectorArrow" /> 箭头线</button>
               </div>
             </div>
             <button class="button subtle" @click="openImage(null)"><FileImage :size="16" /> 图片</button>
             <button class="button subtle" @click="addObject('table')"><Table2 :size="16" /> 表格</button>
             <div class="presentation-menu-wrap">
               <button class="button subtle" :aria-expanded="toolMenu === 'chart'" @click="toggleTool('chart')"><BarChart3 :size="16" /> 图表</button>
-              <div v-if="toolMenu === 'chart'" class="panel presentation-menu presentation-menu-grid">
-                <button v-for="(label, key) in chartTypes" :key="key" type="button" class="button subtle" @click="insertChart(key)">{{ label }}</button>
+              <div v-if="toolMenu === 'chart'" class="panel presentation-menu presentation-chart-menu">
+                <button v-for="(label, key) in chartTypes" :key="key" type="button" class="button subtle" @click="insertChart(key)">
+                  <component :is="chartIcons[key]" :size="23" aria-hidden="true" />{{ label }}
+                </button>
               </div>
             </div>
             <button class="button subtle" @click="openFormula()"><Sigma :size="16" /> 公式</button>
@@ -609,7 +625,7 @@ function shortcuts(event) {
           <label class="presentation-notes">讲者备注<textarea v-model="notes" rows="3" maxlength="8000" @input="dirty = true" @blur="commitNotes" /></label>
         </section>
         <SlideInspector :slide="page" :item="item" :selected="selected" @change="setItem" @select="select" @edit="editContent" @align="alignSelection"
-          @background-all="applyBackground" @transition="setTransition" @global-font="applyFont"
+          @background-all="applyBackground" @transition="setTransition" @global-font="applyFont" @unlock-shapes="unlockShapes"
           @background="change(() => page.background = $event)" @delete="deleteSelection" @layer="rearrange" @group="organize()" @ungroup="organize(true)" />
       </div>
       <input ref="fileInput" type="file" accept="image/png,image/jpeg" hidden @change="loadImage">

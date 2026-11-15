@@ -3,7 +3,7 @@ import { AlignCenter, AlignLeft, AlignRight, Bold, Italic, Underline, Lock, Lock
 import { fonts, labels, shapes, slideFontNames, transitions } from '../presentation'
 
 const props = defineProps({ item: Object, slide: { type: Object, required: true }, selected: { type: Array, required: true } })
-const emit = defineEmits(['change', 'select', 'edit', 'delete', 'layer', 'group', 'ungroup', 'align', 'background', 'backgroundAll', 'transition', 'globalFont'])
+const emit = defineEmits(['change', 'select', 'edit', 'delete', 'layer', 'group', 'ungroup', 'align', 'background', 'backgroundAll', 'transition', 'globalFont', 'unlockShapes'])
 const numberFields = [
   ['x', 'X', -960, 1920], ['y', 'Y', -540, 1080], ['width', '宽度', 8, 1920], ['height', '高度', 8, 1080],
 ]
@@ -35,10 +35,14 @@ function updateNumber(key, lower, upper, event) {
       </template>
       <template v-else-if="item">
         <div class="section-heading"><h3>{{ labels[item.kind] }}</h3>
-          <button type="button" class="button subtle icon-only" :aria-label="item.locked ? '解锁对象' : '锁定对象'" @click="emit('change',{ locked:!item.locked })">
+          <button type="button" class="button subtle icon-only" :aria-label="item.locked ? '解锁对象' : '锁定对象'"
+            :title="item.locked ? '解锁对象' : '锁定对象'" @click="emit('change',{ locked:!item.locked })">
             <Lock v-if="item.locked" :size="16" /><LockOpen v-else :size="16" />
           </button>
         </div>
+        <button v-if="item.locked" type="button" class="button secondary" @click="emit('change',{ locked:false })">
+          <LockOpen :size="15" /> 解锁后编辑
+        </button>
         <fieldset class="presentation-property-group" :disabled="item.locked">
           <div class="presentation-form-cols">
             <label v-for="[key, name, min, max] in numberFields" :key="key">{{ name }}
@@ -114,6 +118,8 @@ function updateNumber(key, lower, upper, event) {
         <button type="button" class="button secondary" @click="emit('transition',slide.transition || 'none',true)">应用切换到全部</button>
       </template>
       <h3 class="presentation-layer-title">图层</h3>
+      <button v-if="slide.elements.some((layer) => layer.kind === 'shape' && layer.locked)" type="button" class="button secondary"
+        @click="emit('unlockShapes')"><LockOpen :size="15" /> 解锁本页形状</button>
       <ul class="presentation-layers">
         <li v-for="layer in [...slide.elements].reverse()" :key="layer.id">
           <button :aria-pressed="selected.includes(layer.id)" @click="emit('select',layer.id,$event.shiftKey || $event.ctrlKey || $event.metaKey)">

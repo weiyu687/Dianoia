@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { Keyboard } from 'lucide-vue-next'
 import { renderFormula } from '../examMath'
 
 const props = defineProps({ initial: { type: String, default: '' }, busy: Boolean, replace: Boolean })
@@ -12,6 +13,7 @@ const loading = ref(true)
 const field = shallowRef(null)
 const sourceInput = ref(null)
 const loadError = ref('')
+const keyboardOpen = ref(false)
 let active = true
 let previousContainer
 const templates = [
@@ -50,6 +52,7 @@ onMounted(async () => {
     input.addEventListener('input', () => { source.value = input.value })
     previousContainer = window.mathVirtualKeyboard.container
     window.mathVirtualKeyboard.container = keyboardArea.value
+    window.mathVirtualKeyboard.addEventListener('virtual-keyboard-toggle', syncKeyboard)
     container.value.append(input)
     field.value = input
     if (mode.value === 'visual') input.focus()
@@ -65,7 +68,10 @@ onBeforeUnmount(() => {
   active = false
   if (!field.value) return
   window.mathVirtualKeyboard?.hide()
-  if (window.mathVirtualKeyboard) window.mathVirtualKeyboard.container = previousContainer || document.body
+  if (window.mathVirtualKeyboard) {
+    window.mathVirtualKeyboard.removeEventListener('virtual-keyboard-toggle', syncKeyboard)
+    window.mathVirtualKeyboard.container = previousContainer || document.body
+  }
 })
 
 function setMode(next) {
@@ -107,6 +113,8 @@ function toggleKeyboard() {
   else keyboard?.show()
 }
 
+function syncKeyboard() { keyboardOpen.value = !!window.mathVirtualKeyboard?.visible }
+
 function submit() {
   if (canApply.value) emit('apply', source.value.trim())
 }
@@ -114,9 +122,13 @@ function submit() {
 
 <template>
   <form class="stack formula-editor" @submit.prevent="submit">
-    <div class="segmented" role="group" aria-label="公式输入方式">
-      <button type="button" :aria-pressed="mode === 'visual'" :disabled="!!loadError" @click="setMode('visual')">可视输入</button>
-      <button type="button" :aria-pressed="mode === 'latex'" @click="setMode('latex')">LaTeX</button>
+    <div class="formula-toolbar">
+      <div class="segmented" role="group" aria-label="公式输入方式">
+        <button type="button" :aria-pressed="mode === 'visual'" :disabled="!!loadError" @click="setMode('visual')">可视输入</button>
+        <button type="button" :aria-pressed="mode === 'latex'" @click="setMode('latex')">LaTeX</button>
+      </div>
+      <button v-if="mode === 'visual'" type="button" class="button secondary formula-keyboard-toggle" :disabled="!field"
+        :aria-expanded="keyboardOpen" @pointerdown.prevent @click="toggleKeyboard"><Keyboard :size="17" /> 数学键盘</button>
     </div>
     <p v-if="loadError" class="muted">{{ loadError }}</p>
     <div class="formula-templates" aria-label="公式模板">
@@ -124,7 +136,6 @@ function submit() {
     </div>
     <div v-show="mode === 'visual'" class="stack">
       <div ref="container" class="formula-mathfield"><span v-if="loading" class="muted">正在加载公式面板…</span></div>
-      <button v-if="field" type="button" class="button secondary formula-keyboard-toggle" @click="toggleKeyboard">数学键盘</button>
     </div>
     <label v-if="mode === 'latex'">LaTeX 源码
       <textarea ref="sourceInput" v-model="source" rows="4" maxlength="1600" spellcheck="false" class="formula-source"></textarea>
@@ -136,3 +147,22 @@ function submit() {
       :disabled="busy || !canApply">{{ replace ? '更新公式' : '插入公式' }}</button></div>
   </form>
 </template>
+
+<style scoped>
+.formula-editor { min-width: 0; }
+.formula-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.formula-templates { display: flex; flex-wrap: wrap; gap: 4px; }
+.formula-templates button { min-height: 32px; padding: 3px 8px; }
+.formula-mathfield :deep(math-field) {
+  display: block; box-sizing: border-box; width: 100%; min-height: 108px; padding: 13px 16px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: inherit; font-size: 26px;
+}
+.formula-mathfield :deep(math-field::part(virtual-keyboard-toggle)),
+.formula-mathfield :deep(math-field::part(menu-toggle)) { display: none; }
+.formula-keyboard { position: relative; isolation: isolate; min-width: 0; }
+.formula-keyboard :deep(.ML__keyboard) { position: relative !important; transform: none !important; }
+.formula-keyboard :deep(.ML__keyboard.is-visible) { height: var(--_keyboard-height); }
+.formula-source { font-family: Consolas, monospace; }
+.formula-preview { min-height: 35px; padding: 8px 12px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.formula-preview :deep(.katex-display) { margin: .3em 0; }
+</style>

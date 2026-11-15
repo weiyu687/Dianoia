@@ -2,24 +2,13 @@
 import { computed, shallowRef, watch } from 'vue'
 import { Arrow as VArrow, Ellipse as VEllipse, Group as VGroup, Image as VImage, Line as VLine,
   Rect as VRect, Text as VText } from 'vue-konva'
-import { labels } from '../presentation'
+import { labels, shapePolygons } from '../presentation'
 import SlideChart from './SlideChart.vue'
 
 const props = defineProps({ item: { type: Object, required: true }, editable: Boolean })
 const emit = defineEmits(['pick', 'edit', 'moveStart', 'move', 'moveEnd'])
 const picture = shallowRef(null)
-const polygons = {
-  triangle:[.5,0,1,1,0,1], diamond:[.5,0,1,.5,.5,1,0,.5], hexagon:[.24,0,.76,0,1,.5,.76,1,.24,1,0,.5],
-  parallelogram:[.2,0,1,0,.8,1,0,1], trapezoid:[.22,0,.78,0,1,1,0,1],
-  chevron:[0,0,.72,0,1,.5,.72,1,0,1,.3,.5], pentagon:[.5,0,1,.38,.81,1,.19,1,0,.38],
-  arrow:[0,.25,.58,.25,.58,0,1,.5,.58,1,.58,.75,0,.75],
-  arrowLeft:[1,.25,.42,.25,.42,0,0,.5,.42,1,.42,.75,1,.75],
-  arrowUp:[.25,1,.25,.42,0,.42,.5,0,1,.42,.75,.42,.75,1],
-  arrowDown:[.25,0,.25,.58,0,.58,.5,1,1,.58,.75,.58,.75,0],
-  star:[.5,0,.62,.35,1,.38,.71,.61,.8,1,.5,.77,.2,1,.29,.61,0,.38,.38,.35],
-  callout:[0,0,1,0,1,.76,.43,.76,.22,1,.22,.76,0,.76],
-}
-const polygon = computed(() => polygons[props.item.shape]?.map((value, i) => value * (i % 2 ? props.item.height : props.item.width)))
+const polygon = computed(() => shapePolygons[props.item.shape]?.map((value, i) => value * (i % 2 ? props.item.height : props.item.width)))
 const line = computed(() => {
   const { width, height, fill, stroke, line_style, line_width } = props.item
   return { points:[0,0,width,height], fill:stroke || fill, stroke:stroke || fill, strokeWidth:line_width || 2,
