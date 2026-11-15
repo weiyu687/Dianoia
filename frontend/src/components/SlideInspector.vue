@@ -1,15 +1,15 @@
 <script setup>
 import { AlignCenter, AlignLeft, AlignRight, Bold, Italic, Underline, Lock, LockOpen, Trash2 } from 'lucide-vue-next'
-import { chartTypes, fonts, labels, shapes, slideFontNames } from '../presentation'
+import { fonts, labels, shapes, slideFontNames, transitions } from '../presentation'
 
 const props = defineProps({ item: Object, slide: { type: Object, required: true }, selected: { type: Array, required: true } })
-const emit = defineEmits(['change', 'select', 'edit', 'delete', 'layer', 'group', 'ungroup', 'align', 'background'])
+const emit = defineEmits(['change', 'select', 'edit', 'delete', 'layer', 'group', 'ungroup', 'align', 'background', 'backgroundAll', 'transition', 'globalFont'])
 const numberFields = [
   ['x', 'X', -960, 1920], ['y', 'Y', -540, 1080], ['width', '宽度', 8, 1920], ['height', '高度', 8, 1080],
 ]
 function updateNumber(key, lower, upper, event) {
   const number = event.target.valueAsNumber
-  if (!Number.isFinite(number)) { event.target.value = Math.round(props.item[key]); return }
+  if (!Number.isFinite(number)) { event.target.value = props.item[key] ?? lower; return }
   emit('change', { [key]: Math.max(lower, Math.min(upper, number)) })
 }
 </script>
@@ -55,6 +55,11 @@ function updateNumber(key, lower, upper, event) {
               <label>字号<input type="number" min="8" max="144" :value="item.size" @change="updateNumber('size',8,144,$event)"></label>
             </div>
             <label class="presentation-color">文字颜色<input type="color" :value="item.color" @change="emit('change',{color:$event.target.value})"></label>
+            <div class="presentation-form-cols">
+              <label>行距<input type="number" min="1" max="2.4" step=".1" :value="item.line_height || 1.18" @change="updateNumber('line_height',1,2.4,$event)"></label>
+              <label>字间距<input type="number" min="0" max="10" step=".5" :value="item.spacing || 0" @change="updateNumber('spacing',0,10,$event)"></label>
+            </div>
+            <button class="button subtle" type="button" @click="emit('globalFont',item.font)">全稿统一字体</button>
             <div class="presentation-control-row">
               <button v-for="[key, caption, icon] in [['bold','粗体',Bold],['italic','斜体',Italic],['underline','下划线',Underline]]" :key="key"
                 class="button subtle icon-only" :aria-label="caption" :aria-pressed="!!item[key]" @click="emit('change',{[key]:!item[key]})"><component :is="icon" :size="16" /></button>
@@ -63,14 +68,24 @@ function updateNumber(key, lower, upper, event) {
             </div>
           </template>
           <template v-if="item.kind === 'shape'">
-            <label>形状<select :value="item.shape" @change="emit('change',{shape:$event.target.value})"><option v-for="(label,key) in shapes" :key="key" :value="key">{{ label }}</option></select></label>
-            <label class="presentation-color">填充<input type="color" :value="item.fill" @change="emit('change',{fill:$event.target.value})"></label>
-            <label class="presentation-color">边线<input type="color" :value="item.stroke || '#ffffff'" @change="emit('change',{stroke:$event.target.value})"></label>
-            <button v-if="item.stroke" class="button subtle" @click="emit('change',{stroke:null})">移除边线</button>
+            <label>{{ ['connector','connectorArrow'].includes(item.shape) ? '线条' : '形状' }}
+              <select :value="item.shape" @change="emit('change',{shape:$event.target.value})"><option v-for="(label,key) in shapes" :key="key" :value="key">{{ label }}</option></select>
+            </label>
+            <template v-if="['connector','connectorArrow'].includes(item.shape)">
+              <label class="presentation-color">线条颜色<input type="color" :value="item.stroke || item.fill" @change="emit('change',{stroke:$event.target.value})"></label>
+              <label>线宽<input type="number" min="1" max="20" :value="item.line_width || 2" @change="updateNumber('line_width',1,20,$event)"></label>
+              <label>线型<select :value="item.line_style || 'solid'" @change="emit('change',{line_style:$event.target.value})">
+                <option value="solid">实线</option><option value="dash">虚线</option><option value="dot">点线</option>
+              </select></label>
+            </template>
+            <template v-else>
+              <label class="presentation-color">填充<input type="color" :value="item.fill" @change="emit('change',{fill:$event.target.value})"></label>
+              <label class="presentation-color">边线<input type="color" :value="item.stroke || '#ffffff'" @change="emit('change',{stroke:$event.target.value})"></label>
+              <button v-if="item.stroke" class="button subtle" @click="emit('change',{stroke:null})">移除边线</button>
+            </template>
           </template>
           <template v-if="item.kind === 'chart'">
-            <label>图表类型<select :value="item.chart" @change="emit('change',{chart:$event.target.value})"><option v-for="(label,key) in chartTypes" :key="key" :value="key">{{ label }}</option></select></label>
-            <label v-if="item.chart !== 'pie'" class="presentation-color">图表颜色<input type="color" :value="item.fill" @change="emit('change',{fill:$event.target.value})"></label>
+            <label v-if="!['pie','donut'].includes(item.chart)" class="presentation-color">图表颜色<input type="color" :value="item.fill" @change="emit('change',{fill:$event.target.value})"></label>
             <label class="presentation-color">标签颜色<input type="color" :value="item.color" @change="emit('change',{color:$event.target.value})"></label>
           </template>
           <template v-if="item.kind === 'formula'">
@@ -92,6 +107,11 @@ function updateNumber(key, lower, upper, event) {
       <template v-else>
         <h3>页面属性</h3>
         <label class="presentation-color">背景颜色<input type="color" :value="slide.background" @change="emit('background',$event.target.value)"></label>
+        <button type="button" class="button secondary" @click="emit('backgroundAll')">应用背景到全部</button>
+        <label>页面切换<select :value="slide.transition || 'none'" @change="emit('transition',$event.target.value)">
+          <option v-for="(name, key) in transitions" :key="key" :value="key">{{ name }}</option>
+        </select></label>
+        <button type="button" class="button secondary" @click="emit('transition',slide.transition || 'none',true)">应用切换到全部</button>
       </template>
       <h3 class="presentation-layer-title">图层</h3>
       <ul class="presentation-layers">

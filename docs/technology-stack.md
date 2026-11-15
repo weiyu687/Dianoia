@@ -67,6 +67,14 @@ Pillow `>=12.2,<14` 用于服务器端验证 PNG、JPEG 的文件格式与解码
 
 课件公式复用试卷的 MathLive 0.111.4、KaTeX 0.16.47、latex2mathml 3.81.1 和 LaTeX 校验。浏览器采用公式字形排版，PPTX 写入 DrawingML 中的 Office Math。已用最小样例确认 LibreOffice Impress 可将分式和矩阵输出到 PDF。备选 MathJax SVG 可固定显示，但需要另行验证 PowerPoint 原生编辑体验。[Microsoft DrawingML 公式规范](https://learn.microsoft.com/en-us/openspecs/office_standards/ms-odrawxml/cdafda97-9124-48ed-8d64-7f1dd9197c8a) · [MathJax SVG](https://docs.mathjax.org/en/latest/output/index.html)
 
+### 2026-11-15｜课件模板库、编辑器与数据图表
+
+沿用已选 Vue 3、Konva 10.9.1、vue-konva 4.0.1、FastAPI、Pydantic 与 python-pptx 1.0.2。模板按需读取完整页序，样式来自平台的可编辑对象。Kimi 用于对照通用视觉主题，清华大学和 MIT Sloan 的教学或品牌模板用于参考课程结构、投影与录课构图。PPTist 提供形状、图表和放映入口的交互参考。候选方案包括直接嵌入 PPTist、采用 ECharts 和使用在线设计平台。延续现有画布使在线数据、保存和从同一模型导出原生 PPTX 的行为可独立验证。将学校演示资料作为设计参考，应用内模板采用原创版式和素材。[Kimi Slides](https://www.kimi.ai/academy/slides-intro) · [清华大学](https://www.env.tsinghua.edu.cn/info/1344/7931.htm) · [MIT Sloan](https://mitsloanedtech.mit.edu/studio/download-a-template/) · [PPTist](https://github.com/pipipi-pikachu/PPTist)
+
+参照 Doc2Chart 和 VisEval，把图表意图、来源数据与绘制分开。AI 返回结构化图表请求，服务端核对类别和数值有来源，Konva 和 python-pptx 渲染同一份数据。手动或明确启用的演示数据须可识别。核验重点包括数据值、图形种类、页内来源、可编辑工作簿和 PDF 可见性。[Doc2Chart](https://aclanthology.org/2025.emnlp-main.1770/) · [VisEval](https://arxiv.org/abs/2407.00981)
+
+沿用现有部署依赖。Chrome 验证模板末页预览、折线和散点编辑流程、形状与放映。python-pptx 复读八种原生图表、坐标和数值，LibreOffice Impress 验证八页图表 PDF。真实模型按教师给定的三项读数生成英文折线图，保存并导出。
+
 ## 待验证和待选型
 
 - 资料向量检索的候选为 PostgreSQL + pgvector 与 Qwen3-Embedding。以真实中文课程样本比较证据召回、章节切分与引用页码后再确认。

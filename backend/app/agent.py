@@ -180,12 +180,16 @@ def chat(data: Chat, db: DB, user: Teacher):
 
     def create_presentation_draft(title: str, instruction: str = "", template_id: str | None = None,
                                   sources: list[dict] | None = None, page_count: int = 8, audience: str = "",
-                                  minutes: int = 45, lesson_id: str | None = None) -> dict:
-        """为当前课程生成演示文稿草稿。sources 每项含 resource_id、start、end。"""
+                                  minutes: int = 45, lesson_id: str | None = None, language: Literal["zh", "en"] = "zh",
+                                  writing_style: Literal["general", "academic", "workshop", "briefing"] = "general",
+                                  density: Literal["compact", "standard", "detailed"] = "standard", speaker_notes: bool = True,
+                                  charts: Literal["auto", "off", "example"] = "auto", chart_data: str = "") -> dict:
+        """生成当前课程的课件。sources 含 resource_id、start、end。chart_data 是教师给出的类别,数值，每行一项。"""
         try:
             data = GenerateDeck(course_id=course_id, title=title, instruction=instruction, template_id=template_id,
                                 sources=sources or [], page_count=page_count, audience=audience, minutes=minutes,
-                                lesson_id=lesson_id)
+                                lesson_id=lesson_id, language=language, writing_style=writing_style, density=density,
+                                speaker_notes=speaker_notes, charts=charts, chart_data=chart_data)
         except ValueError:
             return {"error": "请核对课件标题、页数、模板和资料页码"}
 

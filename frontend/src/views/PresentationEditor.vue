@@ -9,7 +9,7 @@ import PdfViewer from '../components/PdfViewer.vue'
 import SlideCanvas from '../components/SlideCanvas.vue'
 import SlideInspector from '../components/SlideInspector.vue'
 import SlideThumbnail from '../components/SlideThumbnail.vue'
-import { clone, height, layouts, newElement, newSlide, readableInk, shapes, slideTitle, uid, width } from '../presentation'
+import { chartTypes, clone, height, layouts, newElement, newSlide, readableInk, shapes, slideTitle, uid, width } from '../presentation'
 import '../presentations.css'
 
 const route = useRoute()
@@ -24,7 +24,15 @@ const selected = ref([])
 const fileInput = ref(null)
 const dragPage = ref('')
 const nextLayout = ref('body')
-const nextShape = ref('rect')
+const toolMenu = ref('')
+const symbolGroup = ref('数学')
+const symbols = {
+  数学: Array.from('±×÷≈≠≤≥∞√∑∏∫∂∇∈∉⊂∪∩∅∀∃'),
+  字母: Array.from('αβγδεζηθικλμνξοπρστυφχψωΓΔΘΛΞΠΣΦΨΩ'),
+  序号: Array.from('①②③④⑤⑥⑦⑧⑨⑩ⅠⅡⅢⅣⅤ'),
+  箭头: Array.from('←↑→↓↔↕⇒⇔↗↘'),
+  图形: Array.from('■□●○◆◇▲△★☆✓✕'),
+}
 const zoom = ref(1)
 const notes = ref('')
 const references = ref([])
@@ -50,6 +58,7 @@ const snapshot = () => ({ title: row.value.title, document: clone(document.value
 
 onMounted(async () => {
   window.addEventListener('keydown', shortcuts)
+  window.addEventListener('pointerdown', closeToolFromOutside)
   window.addEventListener('beforeunload', leave)
   try {
     row.value = await api(endpoint)
@@ -70,6 +79,7 @@ onMounted(async () => {
 })
 onUnmounted(() => {
   window.removeEventListener('keydown', shortcuts)
+  window.removeEventListener('pointerdown', closeToolFromOutside)
   window.removeEventListener('beforeunload', leave)
 })
 onBeforeRouteLeave(() => !dirty.value || window.confirm('课件有未保存的修改，确定离开？'))
@@ -159,6 +169,43 @@ function addObject(kind, fields) {
   change(() => { page.value.elements.push(object); selected.value = [object.id] })
 }
 function setItem(fields) { if (item.value) change(() => Object.assign(item.value, fields)) }
+function toggleTool(name) { toolMenu.value = toolMenu.value === name ? '' : name }
+function closeToolFromOutside(event) {
+  if (toolMenu.value && !event.target.closest?.('.presentation-menu-wrap')) toolMenu.value = ''
+}
+function insertShape(shape) {
+  const line = ['connector', 'connectorArrow'].includes(shape)
+  addObject('shape', { shape, ...(line ? { width: 220, height: 48, fill: readableInk(page.value.background) } : {}) })
+  toolMenu.value = ''
+}
+function insertChart(chart) {
+  const labels = chart === 'scatter' ? ['1','2','3'] : ['类别一','类别二','类别三']
+  const chartObject = newElement('chart', { chart, labels, color: readableInk(page.value.background) })
+  if (page.value.elements.length >= 100) return
+  toolMenu.value = ''
+  formError.value = ''
+  modal.value = { type: 'element', item: chartObject, adding: true }
+}
+function insertSymbol(symbol) {
+  if (item.value?.kind === 'text' && !item.value.locked && item.value.text.length < 4000) setItem({ text: item.value.text + symbol })
+  else addObject('text', { text: symbol, width: 100, height: 58, size: 32, color: readableInk(page.value.background) })
+  toolMenu.value = ''
+}
+function applyBackground() {
+  change(() => { for (const slide of document.value.slides) slide.background = page.value.background })
+}
+function applyFont(font) {
+  change(() => {
+    for (const slide of document.value.slides)
+      for (const element of slide.elements)
+        if (element.kind === 'text' || element.kind === 'table') element.font = font
+  })
+}
+function setTransition(value, all = false) {
+  change(() => {
+    for (const slide of all ? document.value.slides : [page.value]) slide.transition = value
+  })
+}
 function setPositions(positions) {
   const affected = page.value.elements.filter((object) => !object.locked && positions.some((position) => position.id === object.id))
   if (!affected.length) return
@@ -373,9 +420,19 @@ async function saveDialog() {
   const form = modal.value
   if (form.type === 'element') {
     const target = page.value.elements.find((object) => object.id === form.item.id)
-    if (!target || target.locked) return
-    if (form.item.kind === 'chart' && !form.item.values.some((value) => value > 0)) { formError.value = '至少需要一个大于 0 的数据'; return }
-    change(() => Object.assign(target, form.item))
+    if (!form.adding && (!target || target.locked)) return
+    if (form.item.kind === 'chart') {
+      const { chart, labels, values } = form.item
+      if (['pie','donut','radar'].includes(chart) && (values.some((value) => value < 0) || !values.some((value) => value > 0))) {
+        formError.value = '饼图、环形图和雷达图需要非负数据，且至少有一个正数'; return
+      }
+      if (chart === 'radar' && values.length < 3) { formError.value = '雷达图至少需要三项'; return }
+      if (chart === 'scatter' && labels.some((label) => !label.trim() || !Number.isFinite(Number(label)) || Math.abs(Number(label)) > 1e12)) {
+        formError.value = '散点图的横坐标必须是有效数字'; return
+      }
+    }
+    if (form.adding) change(() => { page.value.elements.push(form.item); selected.value = [form.item.id] })
+    else change(() => Object.assign(target, form.item))
   } else if (form.type === 'sources' || form.type === 'cite') {
     const sources = form.type === 'sources' ? form.references : document.value.sources
     const fits = (citation) => sources.some((source) => source.resource_id === citation.resource_id &&
@@ -400,8 +457,9 @@ async function saveDialog() {
   }
   modal.value = null
 }
-function startPlay() {
-  playIndex.value = pageNumber.value - 1
+function startPlay(fromBeginning) {
+  toolMenu.value = ''
+  playIndex.value = fromBeginning ? 0 : pageNumber.value - 1
   play.value = true
   nextTick(() => playSurface.value?.focus())
 }
@@ -414,6 +472,7 @@ function shortcuts(event) {
     if (['ArrowLeft','ArrowUp','PageUp'].includes(event.key)) { event.preventDefault(); step(-1) }
     return
   }
+  if (event.key === 'Escape' && toolMenu.value) toolMenu.value = ''
   if (modal.value || pdf.value || busy.value || event.target.closest?.('input, textarea, select, [contenteditable]')) return
   const primary = event.ctrlKey || event.metaKey
   const key = event.key.toLowerCase()
@@ -456,7 +515,13 @@ function shortcuts(event) {
           <button class="button secondary" :disabled="busy" @click="openDialog('template')">存为模板</button>
           <button class="button secondary" :disabled="busy" @click="preview">PDF 预览</button>
           <button class="button secondary" :disabled="busy" @click="exportFile('pptx')"><Download :size="16" /> PPTX</button>
-          <button class="button secondary" :disabled="busy" @click="startPlay"><Play :size="16" /> 放映</button>
+          <div class="presentation-menu-wrap">
+            <button class="button secondary" :disabled="busy" :aria-expanded="toolMenu === 'play'" @click="toggleTool('play')"><Play :size="16" /> 放映</button>
+            <div v-if="toolMenu === 'play'" class="panel presentation-menu presentation-menu-right">
+              <button type="button" class="button subtle" @click="startPlay(true)">从头开始</button>
+              <button type="button" class="button subtle" @click="startPlay(false)">从当前页开始</button>
+            </div>
+          </div>
           <button class="button primary" :disabled="busy || !dirty" @click="save"><Save :size="16" /> 保存</button>
         </div>
       </header>
@@ -473,12 +538,40 @@ function shortcuts(event) {
           </div>
           <div class="presentation-toolgroup">
             <button class="button subtle" @click="addObject('text', { color: readableInk(page.background) })"><Type :size="16" /> 文本</button>
-            <button class="button subtle" @click="addObject('shape',{shape:nextShape})"><Shapes :size="16" /> 形状</button>
-            <select v-model="nextShape" aria-label="插入形状"><option v-for="(label, key) in shapes" :key="key" :value="key">{{ label }}</option></select>
+            <div class="presentation-menu-wrap">
+              <button class="button subtle" :aria-expanded="toolMenu === 'shape'" @click="toggleTool('shape')"><Shapes :size="16" /> 形状</button>
+              <div v-if="toolMenu === 'shape'" class="panel presentation-menu presentation-menu-grid">
+                <button v-for="(label, key) in shapes" v-show="!['connector','connectorArrow','line'].includes(key)" type="button"
+                  :key="key" class="button subtle" @click="insertShape(key)">{{ label }}</button>
+              </div>
+            </div>
+            <div class="presentation-menu-wrap">
+              <button class="button subtle" :aria-expanded="toolMenu === 'line'" @click="toggleTool('line')">╱ 线条</button>
+              <div v-if="toolMenu === 'line'" class="panel presentation-menu">
+                <button type="button" class="button subtle" @click="insertShape('connector')">直线</button>
+                <button type="button" class="button subtle" @click="insertShape('connectorArrow')">箭头线</button>
+              </div>
+            </div>
             <button class="button subtle" @click="openImage(null)"><FileImage :size="16" /> 图片</button>
             <button class="button subtle" @click="addObject('table')"><Table2 :size="16" /> 表格</button>
-            <button class="button subtle" @click="addObject('chart', { color: readableInk(page.background) })"><BarChart3 :size="16" /> 图表</button>
+            <div class="presentation-menu-wrap">
+              <button class="button subtle" :aria-expanded="toolMenu === 'chart'" @click="toggleTool('chart')"><BarChart3 :size="16" /> 图表</button>
+              <div v-if="toolMenu === 'chart'" class="panel presentation-menu presentation-menu-grid">
+                <button v-for="(label, key) in chartTypes" :key="key" type="button" class="button subtle" @click="insertChart(key)">{{ label }}</button>
+              </div>
+            </div>
             <button class="button subtle" @click="openFormula()"><Sigma :size="16" /> 公式</button>
+            <div class="presentation-menu-wrap">
+              <button class="button subtle" :aria-expanded="toolMenu === 'symbol'" @click="toggleTool('symbol')">Ω 符号</button>
+              <div v-if="toolMenu === 'symbol'" class="panel presentation-menu">
+                <div class="presentation-category">
+                  <button v-for="(_,key) in symbols" :key="key" type="button" class="button subtle" :aria-pressed="symbolGroup === key" @click="symbolGroup = key">{{ key }}</button>
+                </div>
+                <div class="presentation-symbols">
+                  <button v-for="symbol in symbols[symbolGroup]" :key="symbol" type="button" class="button subtle" @click="insertSymbol(symbol)">{{ symbol }}</button>
+                </div>
+              </div>
+            </div>
           </div>
           <div class="presentation-toolgroup"><button class="button subtle" @click="openDialog('AI')"><Sparkles :size="17" /> AI 局部生成</button></div>
         </div>
@@ -516,13 +609,14 @@ function shortcuts(event) {
           <label class="presentation-notes">讲者备注<textarea v-model="notes" rows="3" maxlength="8000" @input="dirty = true" @blur="commitNotes" /></label>
         </section>
         <SlideInspector :slide="page" :item="item" :selected="selected" @change="setItem" @select="select" @edit="editContent" @align="alignSelection"
+          @background-all="applyBackground" @transition="setTransition" @global-font="applyFont"
           @background="change(() => page.background = $event)" @delete="deleteSelection" @layer="rearrange" @group="organize()" @ungroup="organize(true)" />
       </div>
       <input ref="fileInput" type="file" accept="image/png,image/jpeg" hidden @change="loadImage">
       <Teleport to="body">
         <div v-if="play" class="presentation-player" role="dialog" aria-modal="true" aria-label="放映">
           <button ref="playSurface" type="button" class="presentation-play-surface" aria-label="点击画面翻到下一页" @click="step(1)">
-            <SlideCanvas :slide="document.slides[playIndex]" />
+            <SlideCanvas :key="playIndex" :slide="document.slides[playIndex]" :class="'presentation-transition-' + document.slides[playIndex].transition" />
           </button>
           <div class="presentation-play-controls"><button class="button secondary" :disabled="!playIndex" @click="step(-1)">上一页</button>
             <span>{{ playIndex + 1 }} / {{ document.slides.length }}</span>
@@ -550,9 +644,12 @@ function shortcuts(event) {
             </tbody></table></div>
           </template>
           <template v-else>
+            <label>图表类型<select v-model="modal.item.chart"><option v-for="(label,key) in chartTypes" :key="key" :value="key">{{ label }}</option></select></label>
+            <label>图表标题<input v-model.trim="modal.item.chart_title" maxlength="80"></label>
             <div v-for="(_, index) in modal.item.labels" :key="index" class="presentation-form-cols">
-              <label>类别 {{ index + 1 }}<input v-model="modal.item.labels[index]" maxlength="160" required></label>
-              <label>数值 {{ index + 1 }}<input v-model.number="modal.item.values[index]" min="0" max="1000000000000" type="number" step="any" required></label>
+              <label>{{ modal.item.chart === 'scatter' ? '横坐标' : '类别' }} {{ index + 1 }}<input v-model.trim="modal.item.labels[index]" maxlength="160" required></label>
+              <label>{{ modal.item.chart === 'scatter' ? '纵坐标' : '数值' }} {{ index + 1 }}
+                <input v-model.number="modal.item.values[index]" min="-1000000000000" max="1000000000000" type="number" step="any" required></label>
             </div>
             <div class="presentation-control-row">
               <button type="button" class="button secondary" :disabled="modal.item.labels.length >= 16" @click="modal.item.labels.push('新类别'); modal.item.values.push(1)">增加类别</button>

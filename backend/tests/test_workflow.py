@@ -100,6 +100,8 @@ class WorkflowTest(unittest.TestCase):
                 canvas.bookmarkPage("next")
                 canvas.addOutlineEntry("Next chapter", "next")
                 canvas.drawString(40, 500, "Repeatable read is an isolation level.")
+                canvas.drawString(40, 470, "Group A: 14")
+                canvas.drawString(40, 450, "Group B: 25")
                 canvas.save()
                 self.check_word_preview(client, teacher, course, file.getvalue(), engine, FILES, Resource, identifier)
                 resource = client.post("/api/resources", data={"course_id": course}, files={
@@ -193,7 +195,9 @@ class WorkflowTest(unittest.TestCase):
 
         decks, templates = "/api/presentations", "/api/presentation-templates"
         for key in template_keys():
-            Deck.model_validate(builtin(key)["document"])
+            template = Deck.model_validate(builtin(key)["document"])
+            self.assertGreaterEqual(len(template.slides), 8)
+            self.assertTrue(any(item.kind == "chart" for slide in template.slides for item in slide.elements))
         self.assertEqual(len(client.get(templates).raise_for_status().json()), len(template_keys()))
         source = {"resource_id": resource_id, "start": 2, "end": 2}
         outline = [{"title": title} for title in ("隔离级别", "概念", "实验")]
@@ -238,13 +242,47 @@ class WorkflowTest(unittest.TestCase):
         self.assertTrue(all(not slide["citations"] for slide in new["document"]["slides"]))
         pptx = Presentation(BytesIO(client.get(f"{detail}/export/pptx").raise_for_status().content))
         self.assertEqual(len(pptx.slides), 3)
-        self.assertEqual(pptx.slides[0].shapes[1].text, candidate["text"])
+        self.assertTrue(any(shape.has_text_frame and shape.text == candidate["text"] for shape in pptx.slides[0].shapes))
         self.assertEqual(pptx.slides[0].notes_slide.notes_text_frame.text, first["notes"])
         table = next(shape.table for shape in pptx.slides[1].shapes if shape.has_table)
         self.assertEqual(table.cell(1, 0).text, "Repeatable read")
         self.assertTrue(any(shape.has_text_frame and "    return 42" in shape.text for shape in pptx.slides[2].shapes))
         self.assertIn("a14:m", pptx.slides[2].shapes[-1]._element.xml)
+        self.check_presentation_charts(client, data, outline)
         return deck["id"], template["id"]
+
+    def check_presentation_charts(self, client, data, outline):
+        from pptx.enum.chart import XL_CHART_TYPE
+
+        chart = {"kind": "scatter", "title": "实验 X/Y", "labels": ["0", "12"], "values": [-4, 10]}
+        pages = [{"title": entry["title"], "layout": layout, "points": ["观察数据变化"], "notes": "讲者提示"}
+                 for entry, layout in zip(outline, ("cover", "data", "closing"))]
+        pages[1]["chart"] = chart
+        options = {"language": "en", "writing_style": "academic", "speaker_notes": False,
+                   "chart_data": "0,-4\n12,10"}
+        with patch("app.presentations.generate", return_value=json.dumps({"pages": pages})) as model:
+            generated = client.post("/api/presentations/generate", json=data | options).raise_for_status().json()
+            self.assertEqual(json.loads(model.call_args.args[1])["输出语言"], "English")
+            unverified = client.post("/api/presentations/generate", json=data).raise_for_status().json()
+        slide = generated["document"]["slides"][1]
+        element = next(item for item in slide["elements"] if item["kind"] == "chart")
+        self.assertEqual(element["values"], [-4, 10])
+        self.assertEqual(slide["notes"], "")
+        self.assertTrue(any("教师提供的数据" in item["text"] for item in slide["elements"]))
+        self.assertFalse(any(item["kind"] == "chart" for item in unverified["document"]["slides"][1]["elements"]))
+        pptx_url = f"/api/presentations/{generated['id']}/export/pptx"
+        pptx = Presentation(BytesIO(client.get(pptx_url).raise_for_status().content))
+        native = next(shape.chart for shape in pptx.slides[1].shapes if shape.has_chart)
+        self.assertEqual(native.chart_type, XL_CHART_TYPE.XY_SCATTER)
+        self.assertEqual(tuple(native.series[0].values), (-4, 10))
+        pages[1]["chart"] = {"kind": "column", "title": "实验结果", "labels": ["Group A", "Group B"], "values": [14, 25]}
+        pages[1]["citations"] = data["sources"]
+        with patch("app.presentations.generate", return_value=json.dumps({"pages": pages})):
+            referenced = client.post("/api/presentations/generate", json=data).raise_for_status().json()
+            disabled = client.post("/api/presentations/generate", json=data | {"charts": "off"}).raise_for_status().json()
+        self.assertTrue(any(element["kind"] == "chart" for element in referenced["document"]["slides"][1]["elements"]))
+        self.assertTrue(any("p.2" in element["text"] for element in referenced["document"]["slides"][1]["elements"]))
+        self.assertFalse(any(element["kind"] == "chart" for element in disabled["document"]["slides"][1]["elements"]))
 
     def check_mind_maps(self, client, course, resource_id):
         maps, templates = "/api/mind-maps", "/api/mind-map-templates"

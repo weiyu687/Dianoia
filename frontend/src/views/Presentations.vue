@@ -8,6 +8,7 @@ import Empty from '../components/Empty.vue'
 import Modal from '../components/Modal.vue'
 import MapSources from '../components/MapSources.vue'
 import SlideThumbnail from '../components/SlideThumbnail.vue'
+import { slideTitle } from '../presentation'
 import '../presentations.css'
 
 const router = useRouter()
@@ -22,7 +23,10 @@ const formError = ref('')
 const section = ref('decks')
 const search = ref('')
 const modal = ref(null)
+const templateCategory = ref('all')
+const templatePage = ref(0)
 const visible = computed(() => (section.value === 'decks' ? rows.value : templates.value)
+  .filter((item) => section.value === 'decks' || templateCategory.value === 'all' || item.category === templateCategory.value)
   .filter((item) => item.title.toLowerCase().includes(search.value.trim().toLowerCase())))
 
 onMounted(async () => {
@@ -43,7 +47,24 @@ onMounted(async () => {
 function open(mode, template = null) {
   formError.value = ''
   modal.value = { mode, title: '', template_id: template?.id || '', page_count: 8, minutes: 45,
-    audience: '本科生', lesson_id: '', instruction: '', sources: [], outline: [] }
+    audience: '本科生', lesson_id: '', instruction: '', sources: [], outline: [], language: 'zh',
+    writing_style: 'general', density: 'standard', charts: 'auto', chart_data: '', speaker_notes: true }
+}
+
+async function previewTemplate(item) {
+  formError.value = ''
+  templatePage.value = 0
+  const preview = { mode: 'preview', item, loading: true, slides: [] }
+  modal.value = preview
+  try {
+    const { document } = await api('/presentation-templates/' + encodeURIComponent(item.id))
+    if (modal.value?.item !== item) return
+    modal.value.slides = document.slides
+  } catch (failure) {
+    if (modal.value?.item === item) formError.value = failure.message
+  } finally {
+    if (modal.value?.item === item) modal.value.loading = false
+  }
 }
 
 async function submit() {
@@ -113,6 +134,10 @@ function manage(mode, item, template = false) {
       </div>
       <label class="search"><Search :size="16" /><input v-model="search" aria-label="搜索" placeholder="搜索名称" type="search"></label>
     </div>
+    <div v-if="section === 'templates'" class="presentation-category" aria-label="模板分类">
+      <button v-for="[value, label] in [['all','全部'],['style','通用风格'],['teaching','教学课件'],['personal','我的模板']]"
+        :key="value" type="button" class="button subtle" :aria-pressed="templateCategory === value" @click="templateCategory = value">{{ label }}</button>
+    </div>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <div v-if="loading" class="empty-state" role="status">正在加载演示文稿</div>
     <template v-else-if="visible.length">
@@ -131,7 +156,7 @@ function manage(mode, item, template = false) {
       </div>
       <div v-else class="presentation-template-grid">
         <article v-for="item in visible" :key="item.id" class="panel presentation-template-card">
-          <button type="button" class="presentation-template-select" :aria-label="'使用模板 ' + item.title" @click="open('new', item)">
+          <button type="button" class="presentation-template-select" :aria-label="'预览模板 ' + item.title" @click="previewTemplate(item)">
             <span class="presentation-template-preview">
               <SlideThumbnail :slide="item.thumbnail" />
               <span v-if="item.sample" class="presentation-template-sample"><SlideThumbnail :slide="item.sample" /></span>
@@ -146,10 +171,36 @@ function manage(mode, item, template = false) {
         </article>
       </div>
     </template>
-    <Empty v-else :title="search ? '没有匹配的结果' : '还没有课件'" :detail="search ? '' : '新建空白课件，或从模板库选择教学版式。'" />
-    <Modal :open="!!modal" :title="{ new: '新建课件', AI: 'AI 生成课件', rename: '重命名模板', delete: '删除确认' }[modal?.mode]"
-      :wide="modal?.mode === 'AI'" @close="!busy && (modal = null)">
-      <form v-if="modal" class="stack" @submit.prevent="submit">
+    <Empty v-else :title="search ? '没有匹配的结果' : section === 'templates' ? '暂无模板' : '还没有课件'"
+      :detail="search || section === 'templates' ? '' : '新建空白课件，或从模板库选择教学版式。'" />
+    <Modal :open="!!modal" :class="{ 'presentation-preview-dialog': modal?.mode === 'preview' }" :title="modal?.mode === 'preview' ? modal.item.title :
+      { new: '新建课件', AI: 'AI 生成课件', rename: '重命名模板', delete: '删除确认' }[modal?.mode]"
+      :wide="['AI','preview'].includes(modal?.mode)" @close="!busy && (modal = null)">
+      <section v-if="modal?.mode === 'preview'" class="stack"
+        @keydown.left.prevent="templatePage = Math.max(0, templatePage - 1)"
+        @keydown.right.prevent="templatePage = Math.min(Math.max(0, modal.slides.length - 1), templatePage + 1)">
+        <p v-if="modal.loading" role="status">正在加载模板</p>
+        <p v-else-if="formError" class="error" role="alert">{{ formError }}</p>
+        <template v-else-if="modal.slides.length">
+          <SlideThumbnail :slide="modal.slides[templatePage]" />
+          <div class="section-heading">
+            <button type="button" class="button secondary" :disabled="!templatePage" @click="templatePage--">上一页</button>
+            <span role="status">{{ templatePage + 1 }} / {{ modal.slides.length }}</span>
+            <button type="button" class="button secondary" :disabled="templatePage + 1 >= modal.slides.length" @click="templatePage++">下一页</button>
+          </div>
+          <div class="presentation-preview-pages" aria-label="全部模板页">
+            <button v-for="(slide,index) in modal.slides" :key="slide.id" type="button" class="presentation-page-tile"
+              :aria-pressed="templatePage === index" :aria-label="'第 ' + (index + 1) + ' 页 ' + slideTitle(slide)" @click="templatePage = index">
+              <SlideThumbnail :slide="slide" /><span>{{ index + 1 }} · {{ slideTitle(slide) }}</span>
+            </button>
+          </div>
+          <div class="dialog-actions">
+            <button type="button" class="button secondary" @click="open('AI', modal.item)">用此模板 AI 生成</button>
+            <button type="button" class="button primary" @click="open('new', modal.item)">使用模板</button>
+          </div>
+        </template>
+      </section>
+      <form v-else-if="modal" class="stack" @submit.prevent="submit">
         <p v-if="modal.mode === 'delete'">删除「{{ modal.item.title }}」？</p>
         <template v-else>
           <label>{{ modal.mode === 'rename' ? '模板名称' : '课件名称' }}<input v-model.trim="modal.title" maxlength="160" required></label>
@@ -159,6 +210,15 @@ function manage(mode, item, template = false) {
           <template v-if="modal.mode === 'AI'">
             <template v-if="!modal.outline.length">
               <label>授课对象<input v-model.trim="modal.audience" maxlength="160"></label>
+              <div class="presentation-form-cols">
+                <label>语言<select aria-label="语言" v-model="modal.language"><option value="zh">中文</option><option value="en">English</option></select></label>
+                <label>写作风格<select aria-label="写作风格" v-model="modal.writing_style"><option value="general">通用</option><option value="academic">学术</option><option value="workshop">实训</option><option value="briefing">简报</option></select></label>
+                <label>内容密度<select aria-label="内容密度" v-model="modal.density"><option value="compact">精简</option><option value="standard">标准</option><option value="detailed">详细</option></select></label>
+                <label>图表<select aria-label="图表策略" v-model="modal.charts"><option value="auto">使用可核对数据</option><option value="off">不生成图表</option><option value="example">允许标注示例数据</option></select></label>
+              </div>
+              <label v-if="modal.charts !== 'off'">图表数据（可选，每行以英文逗号分隔类别和数值）
+                <textarea v-model.trim="modal.chart_data" rows="3" maxlength="2200" placeholder="第一组,42" spellcheck="false"></textarea></label>
+              <label class="presentation-checkbox"><input v-model="modal.speaker_notes" type="checkbox">生成讲者备注</label>
               <div class="presentation-form-cols">
                 <label>授课时间（分钟）<input v-model.number="modal.minutes" type="number" min="5" max="240" required></label>
                 <label>页数<input v-model.number="modal.page_count" type="number" min="3" max="24" required></label>

@@ -5,4 +5,5 @@ description: 使用当前课程资料准备教学演示文稿和局部修改候�
 
 - 查找已有课件使用 find_presentations，读取大纲或单页使用 presentation_contents。
 - 按教学场景选模板前使用 find_presentation_templates。按教师要求读取相关教案或资料页，再用 create_presentation_draft 生成草稿。
+- 按教师指定设置语言、写作风格、信息密度和讲者备注。图表优先使用有出处的资料数据或教师明确提供的数据，示例图表须由教师明确要求。
 - 对已有课件先读取目标页。propose_presentation_edit 生成候选，说明修改页和引用范围，并提供编辑入口。教师可在课件页面采纳对应内容。

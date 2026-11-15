@@ -2,8 +2,15 @@ export const width = 960
 export const height = 540
 export const labels = { text: '文本框', shape: '形状', image: '图片', table: '表格', chart: '图表', formula: '公式' }
 export const layouts = { blank: '空白', cover: '封面', body: '标题与正文', two: '双栏', steps: '步骤', table: '表格' }
-export const shapes = { rect: '矩形', round: '圆角矩形', ellipse: '椭圆', triangle: '三角形', arrow: '箭头', line: '线条' }
-export const chartTypes = { column: '柱状图', line: '折线图', pie: '饼图' }
+export const shapes = {
+  rect: '矩形', round: '圆角矩形', ellipse: '椭圆', triangle: '三角形', diamond: '菱形', hexagon: '六边形',
+  pentagon: '五边形', parallelogram: '平行四边形', trapezoid: '梯形', star: '五角星', callout: '标注框',
+  arrow: '右箭头', arrowLeft: '左箭头', arrowUp: '上箭头', arrowDown: '下箭头', chevron: '燕尾箭头',
+  line: '水平线', connector: '直线', connectorArrow: '箭头线',
+}
+export const chartTypes = { column: '柱状图', bar: '条形图', line: '折线图', area: '面积图',
+  scatter: '散点图', pie: '饼图', donut: '环形图', radar: '雷达图' }
+export const transitions = { none: '无', fade: '淡入', push: '推入' }
 export const fonts = ['Microsoft YaHei', 'SimSun', 'SimHei', 'Arial', 'Consolas']
 export const slideFontNames = { 'Microsoft YaHei': '微软雅黑', SimSun: '宋体', SimHei: '黑体' }
 export const uid = () => crypto.randomUUID()
