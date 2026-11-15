@@ -1,9 +1,9 @@
 <script setup>
-import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-vue-next'
+import { ArrowDown, ArrowUp, Play, Plus, Trash2, X } from 'lucide-vue-next'
 import { animationEffects, labels } from '../presentation'
 
-const props = defineProps({ slide: { type: Object, required: true }, item: Object })
-const emit = defineEmits(['add', 'update', 'remove', 'move', 'select'])
+const props = defineProps({ slide: { type: Object, required: true }, selection: String, canAdd: Boolean })
+const emit = defineEmits(['add', 'update', 'remove', 'move', 'select', 'preview', 'close'])
 
 function title(id) {
   const item = props.slide.elements.find((object) => object.id === id)
@@ -21,13 +21,16 @@ function duration(entry, event) {
 </script>
 
 <template>
-  <section class="presentation-animation-list" aria-label="当前页动画">
-    <div class="section-heading">
-      <h3>对象动画</h3>
-      <button type="button" class="button subtle icon-only" :disabled="!item || (slide.animations?.length || 0) >= 50"
-        title="为选中对象添加动画" aria-label="添加动画" @click="emit('add')"><Plus :size="17" /></button>
-    </div>
-    <p v-if="!slide.animations?.length && !item" class="muted">选中对象后添加动画</p>
+  <section class="presentation-inspector" aria-label="当前页动画">
+    <div class="presentation-inspector-body presentation-animation-list">
+      <div class="section-heading">
+        <h3>对象动画</h3>
+        <button type="button" class="button subtle icon-only" title="返回对象属性" aria-label="关闭动画面板"
+          @click="emit('close')"><X :size="16" /></button>
+      </div>
+      <p v-if="selection" class="muted">已选中 {{ selection }}</p>
+      <p v-else class="muted">点选画布上的对象即可添加动画</p>
+      <button v-if="selection" type="button" class="button secondary" :disabled="!canAdd" @click="emit('add')"><Plus :size="16" /> 添加淡入</button>
     <article v-for="(entry,index) in slide.animations" :key="entry.id" class="presentation-animation-row" :aria-label="'动画 ' + (index + 1)">
       <div class="presentation-animation-heading">
         <button type="button" class="button subtle" :title="title(entry.target_id)" @click="emit('select',entry.target_id)">
@@ -47,6 +50,8 @@ function duration(entry, event) {
       </div>
       <label>时长（秒）<input aria-label="动画时长（秒）" type="number" min=".1" max="5" step=".1" :value="entry.duration_ms / 1000"
         @change="duration(entry,$event)"></label>
+      <button type="button" class="button secondary presentation-animation-preview" @click="emit('preview',entry)"><Play :size="14" /> 预览动画</button>
     </article>
+    </div>
   </section>
 </template>

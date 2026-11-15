@@ -71,7 +71,10 @@ dialog.presentation-preview-dialog.dialog-wide { width:min(860px, calc(100% - 24
 .presentation-inspector { overflow-y: auto; border-inline-start: 1px solid var(--line); }
 .presentation-inspector-body { padding: 12px; display: grid; gap: 10px; }
 .presentation-inspector-body h3 { margin: 0; font-size: 14px; }
-.presentation-animation-list { min-width:0; display:grid; gap:7px; border-bottom:1px solid var(--line); padding-bottom:10px; }
+.presentation-animation-menu { min-width:190px; }
+.presentation-animation-menu p { margin:0; padding:4px 6px; font-size:12px; overflow-wrap:anywhere; }
+.presentation-animation-options { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:3px; }
+.presentation-animation-list { min-width:0; gap:7px; }
 .presentation-animation-list > p { margin:0; font-size:12px; }
 .presentation-animation-row { border:1px solid var(--line); border-radius:7px; padding:6px; display:grid; gap:5px; }
 .presentation-animation-row label { font-size:11px; }
@@ -79,6 +82,7 @@ dialog.presentation-preview-dialog.dialog-wide { width:min(860px, calc(100% - 24
 .presentation-animation-heading { display:grid; grid-template-columns:minmax(0,1fr) repeat(3,25px); }
 .presentation-animation-heading .button { min-height:25px; padding:2px; font-size:12px; overflow:hidden; white-space:nowrap; }
 .presentation-animation-heading .icon-only { width:25px; }
+.presentation-animation-row .presentation-animation-preview { min-height:29px; padding:3px 5px; font-size:12px; }
 .presentation-property-group { padding: 0; margin: 0; border: 0; display: grid; gap: 8px; min-width: 0; }
 .presentation-property-group label { font-size: 12px; }
 .presentation-property-group input, .presentation-property-group select { min-height: 32px; padding: 5px; }

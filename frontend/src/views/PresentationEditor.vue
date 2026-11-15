@@ -1,5 +1,5 @@
 <script setup>
-import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, shallowRef } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, ArrowDown, ArrowUp, BarChart3, ChartArea, ChartBar, ChartLine, ChartPie, ChartScatter,
   Copy, Donut, Download, Film, FileImage, Play, Plus, Radar, Redo2, Save, Shapes, Sigma, Sparkles, Table2, Trash2, Type, Undo2, WandSparkles, X } from 'lucide-vue-next'
@@ -14,7 +14,8 @@ import SlideShapeIcon from '../components/SlideShapeIcon.vue'
 import SlideAnimations from '../components/SlideAnimations.vue'
 import SlideMediaPicker from '../components/SlideMediaPicker.vue'
 import { usePresentationPlayback } from '../presentationPlayback'
-import { chartTypes, clone, height, layouts, newElement, newSlide, readableInk, shapeGroups, shapes, slideTitle, uid, width } from '../presentation'
+import { animationEffects, chartTypes, clone, height, labels, layouts, newElement, newSlide, readableInk,
+  shapeGroups, shapes, slideTitle, uid, width } from '../presentation'
 import '../presentations.css'
 
 const route = useRoute()
@@ -51,6 +52,8 @@ const playIndex = ref(0)
 const playSurface = ref(null)
 const animationPanel = ref(false)
 const playback = usePresentationPlayback()
+const previewPlayback = usePresentationPlayback()
+const previewingAnimation = ref(false)
 const { states: motion, cursor: animationIndex, running: animating } = playback
 const busy = ref(false)
 const loading = ref(true)
@@ -62,11 +65,17 @@ let replacingImage
 const document = computed(() => row.value?.document)
 const page = computed(() => document.value?.slides.find((slide) => slide.id === active.value))
 const item = computed(() => selected.value.length === 1 ? page.value?.elements.find((object) => object.id === selected.value[0]) : null)
+const animationTargets = computed(() => selected.value.filter((id) => page.value?.elements.some((element) => element.id === id)))
+const animationSelection = computed(() => item.value ? item.value.text?.trim().split('\n')[0]?.slice(0, 40) || labels[item.value.kind] :
+  animationTargets.value.length ? animationTargets.value.length + ' 个对象' : '')
+const canAddAnimation = computed(() => animationTargets.value.length > 0 &&
+  (page.value?.animations?.length || 0) + animationTargets.value.length <= 50)
 const pageNumber = computed(() => document.value.slides.findIndex((slide) => slide.id === active.value) + 1)
 const playingPage = computed(() => document.value?.slides[playIndex.value])
 const pendingAnimation = computed(() => animationIndex.value < (playingPage.value?.animations?.length || 0))
 const citeNames = computed(() => Object.fromEntries(references.value.map((resource) => [resource.id, resource.title])))
 const snapshot = () => ({ title: row.value.title, document: clone(document.value), active: active.value })
+watch(previewPlayback.running, (running) => { if (!running) previewingAnimation.value = false })
 
 onMounted(async () => {
   window.addEventListener('keydown', shortcuts)
@@ -91,6 +100,7 @@ onMounted(async () => {
 })
 onUnmounted(() => {
   playback.stop()
+  previewPlayback.stop()
   window.removeEventListener('keydown', shortcuts)
   window.removeEventListener('pointerdown', closeToolFromOutside)
   window.removeEventListener('beforeunload', leave)
@@ -99,6 +109,8 @@ onBeforeRouteLeave(() => !dirty.value || window.confirm('课件有未保存的�
 function leave(event) { if (dirty.value) { event.preventDefault(); event.returnValue = '' } }
 
 function activate(id) {
+  previewPlayback.stop()
+  previewingAnimation.value = false
   active.value = id
   selected.value = []
   notes.value = page.value?.notes || ''
@@ -181,12 +193,29 @@ function addObject(kind, fields) {
   const object = newElement(kind, fields)
   change(() => { page.value.elements.push(object); selected.value = [object.id] })
 }
-function addAnimation() {
-  if (!item.value || (page.value.animations?.length || 0) >= 50) return
+function openAnimations() {
+  animationPanel.value = true
+  toggleTool('animation')
+}
+function closeAnimations() {
+  if (toolMenu.value === 'animation') toolMenu.value = ''
+  animationPanel.value = false
+}
+function addAnimation(effect = 'fade_in') {
+  if (!canAddAnimation.value || busy.value) return
+  const entries = animationTargets.value.map((target_id, index) => ({
+    id: uid(), target_id, effect, trigger: index ? 'after' : 'click', duration_ms: 500,
+  }))
   change(() => {
     page.value.animations ||= []
-    page.value.animations.push({ id: uid(), target_id: item.value.id, effect: 'fade_in', trigger: 'click', duration_ms: 500 })
+    page.value.animations.push(...entries)
   })
+  toolMenu.value = ''
+  if (entries.length === 1) previewAnimation(entries[0])
+}
+function previewAnimation(entry) {
+  previewingAnimation.value = true
+  previewPlayback.enter({ elements: page.value.elements, animations: [{ ...entry, trigger: 'after' }] })
 }
 function updateAnimation(id, changes) {
   const entry = page.value.animations.find((item) => item.id === id)
@@ -517,6 +546,8 @@ async function saveDialog() {
 }
 function startPlay(fromBeginning) {
   toolMenu.value = ''
+  previewPlayback.stop()
+  previewingAnimation.value = false
   playIndex.value = fromBeginning ? 0 : pageNumber.value - 1
   play.value = true
   playback.enter(playingPage.value)
@@ -660,7 +691,18 @@ function shortcuts(event) {
             </div>
           </div>
           <div class="presentation-toolgroup">
-            <button class="button subtle" :aria-pressed="animationPanel" @click="animationPanel = !animationPanel"><WandSparkles :size="17" /> 动画</button>
+            <div class="presentation-menu-wrap">
+              <button class="button subtle" :aria-expanded="toolMenu === 'animation'" @click="openAnimations"><WandSparkles :size="17" /> 动画</button>
+              <div v-if="toolMenu === 'animation'" class="panel presentation-menu presentation-animation-menu">
+                <p class="presentation-picker-heading">{{ animationSelection ? '为「' + animationSelection + '」添加动画' : '请先选中画布上的对象' }}</p>
+                <div class="presentation-animation-options">
+                  <button v-for="(name, effect) in animationEffects" :key="effect" type="button" class="button subtle"
+                    :disabled="!canAddAnimation" @click="addAnimation(effect)">{{ name }}</button>
+                </div>
+                <p v-if="animationSelection && !canAddAnimation" class="muted">当前页最多支持 50 项动画</p>
+                <p v-else-if="animationTargets.length > 1" class="muted">多个对象将按选中顺序接续播放</p>
+              </div>
+            </div>
             <button class="button subtle" @click="openDialog('AI')"><Sparkles :size="17" /> AI 局部生成</button>
           </div>
         </div>
@@ -684,7 +726,9 @@ function shortcuts(event) {
           </div>
         </aside>
         <section class="presentation-center" aria-label="课件画布">
-          <SlideCanvas :slide="page" :selected="selected" :zoom="zoom" editable @select="select" @edit="editContent" @move="setPositions" @transform="setPositions" />
+          <SlideCanvas :slide="page" :selected="selected" :zoom="zoom" :editable="!previewingAnimation"
+            :motion="previewingAnimation ? previewPlayback.states.value : undefined"
+            @select="select" @edit="editContent" @move="setPositions" @transform="setPositions" />
           <div class="presentation-workspace-status"><span>第 {{ pageNumber }} 页 / {{ document.slides.length }}</span>
             <button class="button subtle" @click="openDialog('cite')">本页引用<template v-if="page.citations.length"> · {{ page.citations.length }}</template></button>
             <label>缩放<select v-model.number="zoom"><option :value=".75">75%</option><option :value="1">适应画布</option><option :value="1.25">125%</option><option :value="1.5">150%</option></select></label>
@@ -697,12 +741,12 @@ function shortcuts(event) {
           </div>
           <label class="presentation-notes">讲者备注<textarea v-model="notes" rows="3" maxlength="8000" @input="dirty = true" @blur="commitNotes" /></label>
         </section>
-        <SlideInspector :slide="page" :item="item" :selected="selected" @change="setItem" @select="select" @edit="editContent" @align="alignSelection"
+        <SlideAnimations v-if="animationPanel" :slide="page" :selection="animationSelection" :can-add="canAddAnimation" @close="closeAnimations"
+          @add="addAnimation()" @update="updateAnimation" @remove="removeAnimation" @move="moveAnimation"
+          @select="select" @preview="previewAnimation" />
+        <SlideInspector v-else :slide="page" :item="item" :selected="selected" @change="setItem" @select="select" @edit="editContent" @align="alignSelection"
           @background-all="applyBackground" @transition="setTransition" @global-font="applyFont" @unlock-shapes="unlockShapes"
-          @background="change(() => page.background = $event)" @delete="deleteSelection" @layer="rearrange" @group="organize()" @ungroup="organize(true)">
-          <SlideAnimations v-if="animationPanel" :slide="page" :item="item" @add="addAnimation" @update="updateAnimation"
-            @remove="removeAnimation" @move="moveAnimation" @select="select" />
-        </SlideInspector>
+          @background="change(() => page.background = $event)" @delete="deleteSelection" @layer="rearrange" @group="organize()" @ungroup="organize(true)" />
       </div>
       <input ref="fileInput" type="file" accept="image/png,image/jpeg" hidden @change="loadImage">
       <Teleport to="body">

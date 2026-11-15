@@ -17,7 +17,6 @@ function updateNumber(key, lower, upper, event) {
 <template>
   <aside class="presentation-inspector">
     <div class="presentation-inspector-body">
-      <slot />
       <template v-if="selected.length > 1">
         <h3>{{ selected.length }} 个对象</h3>
         <div class="presentation-control-row">
