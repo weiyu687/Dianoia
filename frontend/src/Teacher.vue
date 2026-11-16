@@ -1,6 +1,6 @@
 <script setup>
 import { onMounted, ref } from 'vue'
-import { BookOpen, ClipboardList, House, LibraryBig, LogOut, MessageCircle, PanelLeft, Presentation, Workflow } from 'lucide-vue-next'
+import { BookOpen, ClipboardList, House, LibraryBig, LogOut, MessageCircle, PanelLeft, Presentation, Video, Workflow } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { changeCourse, courseId, logout, restore, user } from './session'
 import Brand from './components/Brand.vue'
@@ -18,6 +18,7 @@ const items = [
   { to: '/lessons', label: '教案', icon: BookOpen, routes: ['lessons', 'lesson', 'lessonTemplates'] },
   { to: '/mind-maps', label: '思维导图', icon: Workflow, routes: ['mindMaps', 'mindMap', 'mindMapTemplate'] },
   { to: '/presentations', label: '演示文稿', icon: Presentation, routes: ['presentations', 'presentation'] },
+  { to: '/digital-courses', label: '数字课程', icon: Video, routes: ['digitalCourses', 'digitalCourse'] },
   { to: '/exams', label: '试卷', icon: ClipboardList, routes: ['exams', 'exam', 'examTemplates'] },
   { to: '/agent', label: '教师 Agent', icon: MessageCircle, routes: ['agent'] },
 ]
@@ -30,7 +31,8 @@ onMounted(async () => {
 
 function selectCourse(event) {
   const next = event.target.value
-  const workspace = { exam: '/exams', mindMap: '/mind-maps', mindMapTemplate: '/mind-maps', presentation: '/presentations' }[route.name]
+  const workspace = { exam: '/exams', mindMap: '/mind-maps', mindMapTemplate: '/mind-maps', presentation: '/presentations',
+    digitalCourse: '/digital-courses' }[route.name]
   if (workspace) {
     router.push(workspace).then((failure) => {
       if (!failure) changeCourse(next)

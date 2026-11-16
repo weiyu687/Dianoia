@@ -89,6 +89,12 @@ Pillow `>=12.2,<14` 用于服务器端验证 PNG、JPEG 的文件格式与解码
 
 参考 PPTist 对目标对象直接施加效果、完成后推进队列的思路。Dianoia 在 Vue 3、Konva 10.9.1 和 vue-konva 4.0.1 上使用浏览器 `requestAnimationFrame` 计算进度，通过 Konva 批量绘制和 CSS 自定义属性更新对象。预览和网页放映共用队列与效果计算。系统开启减少动态效果时，飞入和缩放强调使用透明度变化。前端依赖及课件动画数据格式沿用原有版本。[PPTist 对象预览](https://github.com/pipipi-pikachu/PPTist/blob/6907580cce33914a4c58be03e13ac0c332d8b5e9/src/views/Editor/Toolbar/ElementAnimationPanel.vue) · [PPTist 放映调度](https://github.com/pipipi-pikachu/PPTist/blob/6907580cce33914a4c58be03e13ac0c332d8b5e9/src/views/Screen/hooks/useExecPlay.ts)
 
+### 2026-11-16｜数字课程首版
+
+按教师确认的 InfiniteTalk 路线开发。教师上传 PPT/PPTX，逐页审阅和编辑口播稿，选择形象和音色后提交生产，在项目内查看进度并导出 MP4。工作流参考讯飞智作。使用 InfiniteTalk 官方单人 image-to-video CLI 的 480P 流式模式，根据人物照片和合成音频生成说话画面。论文分别讨论了流式生成、唇形同步和长序列一致性。Kokoro 可提供预置语音，教师音频样本的零样本克隆需要另外的语音模型。CosyVoice 可作为候选，首版通过本地命令协议接入部署选择的语音合成器。网页端复用 Vue、FastAPI、现有模型接口和 SQLAlchemy 持久化任务，由独立 worker 调用 LibreOffice、Poppler、FFmpeg 和 GPU 推理环境。监听任务进度采用短轮询。[讯飞智作](https://peiyin.xunfei.cn/seospread/ai13/index.html) · [InfiniteTalk 源码](https://github.com/MeiGen-AI/InfiniteTalk) · [InfiniteTalk 论文](https://arxiv.org/abs/2508.14033) · [CosyVoice 接口示例](https://github.com/FunAudioLLM/CosyVoice/blob/main/example.py)
+
+预置音色使用 Kokoro 82M v1.1-zh 的普通话女声和男声，推理在独立 Python 环境运行。APIs 与 worker 共用数据库及素材目录。课件按页导出静态画面，右侧合成数字讲师，输出 1280×720 H.264/AAC。验收环境使用 FFmpeg 7.0.2 和 Poppler 26.07.0。安装变量、语音合成协议和首版限制记录在[数字课程部署说明](digital-courses.md)。[Kokoro 模型卡](https://huggingface.co/hexgrad/Kokoro-82M-v1.1-zh)
+
 ## 待验证和待选型
 
 - 资料向量检索的候选为 PostgreSQL + pgvector 与 Qwen3-Embedding。以真实中文课程样本比较证据召回、章节切分与引用页码后再确认。

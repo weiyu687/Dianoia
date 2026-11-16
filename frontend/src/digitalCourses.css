@@ -1,0 +1,55 @@
+.digital-tabs { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 20px; }
+.digital-projects, .digital-assets { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,246px),1fr)); gap:16px; }
+.digital-projects > .empty-state, .digital-assets > .empty-state { grid-column:1/-1; }
+.digital-project { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:12px; padding:12px; color:var(--text); text-decoration:none; }
+.digital-project:hover { border-color:var(--accent); }
+.digital-project img { grid-column:1/-1; width:100%; aspect-ratio:16/9; object-fit:contain; background:var(--raised); border-radius:10px; }
+.digital-project h3, .digital-asset h3 { margin:0 0 4px; overflow-wrap:anywhere; }
+.digital-project small, .digital-asset small { display:block; color:var(--muted); }
+.digital-asset { display:grid; gap:10px; padding:12px; align-content:start; }
+.digital-asset img { width:100%; aspect-ratio:4/3; object-fit:cover; border-radius:10px; }
+.digital-asset audio, .digital-cast-options audio { width:100%; }
+.digital-asset p { margin:0; overflow-wrap:anywhere; }
+.digital-form { display:grid; gap:14px; }
+.digital-form p { margin:0; }
+.digital-form .digital-consent { display:flex; align-items:center; gap:8px; }
+.digital-consent input { width:auto; min-height:auto; }
+.digital-editor .page-heading { align-items:center; }
+.digital-project-title { min-width:0; flex:1; }
+.digital-project-title input { width:min(100%,640px); font-size:clamp(20px,2.5vw,31px); font-weight:720; }
+.digital-job { margin-bottom:14px; padding:12px 16px; }
+.digital-job div[role=status] { display:flex; flex-wrap:wrap; justify-content:space-between; gap:10px; }
+.digital-job progress { width:100%; height:8px; accent-color:var(--accent); }
+.digital-workspace { display:grid; grid-template-columns:150px minmax(0,1fr) minmax(250px,305px); min-height:490px; overflow:hidden; }
+.digital-pages { display:flex; flex-direction:column; overflow:auto; max-height:560px; padding:10px; gap:8px; border-inline-end:1px solid var(--line); }
+.digital-page { flex-shrink:0; min-width:0; padding:6px; text-align:left; background:var(--raised); color:var(--text); border:1px solid var(--line); border-radius:8px; }
+.digital-page[aria-pressed=true] { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+.digital-page img { width:100%; aspect-ratio:16/9; object-fit:contain; background:#232c39; }
+.digital-page span { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
+.digital-page small { font-size:11px; color:var(--muted); }
+.digital-page .digital-done { color:var(--accent); }
+.digital-preview { display:grid; grid-template-rows:minmax(0,1fr) auto; min-width:0; padding:16px; background:var(--raised); }
+.digital-slide-frame { display:grid; place-items:center; min-height:210px; }
+.digital-slide-frame img { width:100%; max-height:460px; object-fit:contain; }
+.digital-page-nav { display:flex; align-items:center; justify-content:center; gap:10px; }
+.digital-script { display:grid; align-content:start; gap:10px; padding:14px; min-width:0; border-inline-start:1px solid var(--line); }
+.digital-script textarea { width:100%; min-height:245px; resize:vertical; line-height:1.65; }
+.digital-script small { text-align:right; color:var(--muted); }
+.digital-script details p { white-space:pre-wrap; overflow-wrap:anywhere; }
+.digital-casting, .digital-output { margin-top:16px; padding:16px; }
+.digital-cast-options { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:20px; }
+.digital-cast-options select { width:100%; }
+.digital-cast-options img { display:block; width:min(100%,168px); margin-top:10px; border-radius:8px; }
+.digital-cast-options audio { margin-top:10px; max-width:380px; }
+.digital-output video { display:block; width:min(100%,840px); margin:12px auto 0; background:#172537; }
+@media(max-width:1100px) {
+  .digital-workspace { grid-template-columns:124px minmax(0,1fr); }
+  .digital-script { grid-column:1/-1; border-top:1px solid var(--line); border-inline-start:0; }
+}
+@media(max-width:600px) {
+  .digital-workspace { display:flex; flex-direction:column; }
+  .digital-pages { flex-direction:row; overflow-x:auto; border-inline-end:0; }
+  .digital-page { flex-basis:100px; }
+  .digital-editor .page-heading { align-items:stretch; }
+  .digital-cast-options { grid-template-columns:1fr; }
+}
