@@ -128,7 +128,8 @@ def audio_seconds(path):
 
 def normalize_voice(source, output):
     run([executable("ffmpeg"), "-hide_banner", "-loglevel", "error", "-protocol_whitelist", "file",
-         "-format_whitelist", "wav,mp3", "-i", str(source), "-t", "31", "-vn", "-ac", "1", "-ar", "16000",
+         "-format_whitelist", "wav,mp3,matroska,webm,ogg,mov,mp4,m4a,3gp,3g2,mj2", "-i", str(source),
+         "-t", "31", "-vn", "-ac", "1", "-ar", "16000",
          "-c:a", "pcm_s16le", str(output)])
     if not 3 <= audio_seconds(output) <= 30:
         raise CourseMediaError("请上传 3 至 30 秒的清晰语音")
@@ -153,14 +154,26 @@ def talk_command():
     keys = ("ROOT", "PYTHON", "WAN", "WAV2VEC", "WEIGHTS")
     settings = [os.getenv(f"DIANOIA_INFINITETALK_{key}", "") for key in keys]
     root, python, wan, wav2vec, weights = map(Path, settings)
-    if not all(settings) or not (root / "generate_infinitetalk.py").is_file() or not shutil.which(str(python)):
+    quant = os.getenv("DIANOIA_INFINITETALK_QUANT_DIR")
+    if not all(settings[:4]) or not (quant or settings[4]) or not (root / "generate_infinitetalk.py").is_file() or not shutil.which(str(python)):
         raise CourseMediaError("服务器尚未配置 InfiniteTalk 推理环境")
-    if not wan.is_dir() or not wav2vec.is_dir() or not weights.is_file():
+    if not wan.is_dir() or not wav2vec.is_dir() or (not quant and not weights.is_file()):
         raise CourseMediaError("服务器缺少 InfiniteTalk 模型权重")
+    if quant:
+        checkpoint = Path(quant).resolve()
+        files = [checkpoint, checkpoint.with_suffix(".json"), checkpoint.parent / "t5_fp8.safetensors",
+                 checkpoint.parent / "t5_map_fp8.json", wan / "config.json", wan / "Wan2.1_VAE.pth",
+                 wan / "models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth", wav2vec / "config.json"]
+        if not all(path.is_file() for path in files) or not ((wav2vec / "model.safetensors").is_file()
+                                                             or (wav2vec / "pytorch_model.bin").is_file()):
+            raise CourseMediaError("InfiniteTalk FP8 权重尚未下载齐全")
+        checkpoint_args = ["--quant", "fp8", "--quant_dir", str(checkpoint), "--t5_cpu"]
+    else:
+        checkpoint_args = ["--infinitetalk_dir", str(weights.resolve())]
     return root.resolve(), [str(python), str((root / "generate_infinitetalk.py").resolve()),
                             "--ckpt_dir", str(wan.resolve()), "--wav2vec_dir", str(wav2vec.resolve()),
-                            "--infinitetalk_dir", str(weights.resolve()), "--size", "infinitetalk-480",
-                            "--mode", "streaming", "--motion_frame", "9", "--num_persistent_param_in_dit", "0"]
+                            "--size", "infinitetalk-480", "--mode", "streaming", "--motion_frame", "9",
+                            "--num_persistent_param_in_dit", "0", *checkpoint_args]
 
 
 def preset_assets():

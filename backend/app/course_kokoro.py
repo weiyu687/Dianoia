@@ -1,11 +1,14 @@
 """Optional preset narration driver, run in the Kokoro environment."""
 
 import json
+import os
 import sys
 from pathlib import Path
 
 
 def synthesize(request):
+    if home := os.getenv("DIANOIA_COURSE_KOKORO_HOME"):
+        os.environ["HF_HOME"] = home
     import numpy as np
     import soundfile
     from kokoro import KPipeline

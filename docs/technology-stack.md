@@ -95,6 +95,12 @@ Pillow `>=12.2,<14` 用于服务器端验证 PNG、JPEG 的文件格式与解码
 
 预置音色使用 Kokoro 82M v1.1-zh 的普通话女声和男声，推理在独立 Python 环境运行。APIs 与 worker 共用数据库及素材目录。课件按页导出静态画面，右侧合成数字讲师，输出 1280×720 H.264/AAC。验收环境使用 FFmpeg 7.0.2 和 Poppler 26.07.0。安装变量、语音合成协议和首版限制记录在[数字课程部署说明](digital-courses.md)。[Kokoro 模型卡](https://huggingface.co/hexgrad/Kokoro-82M-v1.1-zh)
 
+### 数字课程声音档案与逐页试音
+
+沿用 InfiniteTalk 官方单人推理和现有 WAV 语音合成协议。参考官方示例，`cond_audio.person1` 是待驱动嘴型的整段口播音频。参考样本先由独立 TTS 使用。教师以声音档案管理多条各自带原文的样本，可标记一条用于合成。采用浏览器 MediaRecorder 录音并由现有 FFmpeg 统一转为 16 kHz 单声道 PCM。试音和正式生产复用同一套语音驱动。编辑器参考讯飞智作的课件缩略图、中央画布及右侧素材选取布局。[InfiniteTalk 官方示例](https://raw.githubusercontent.com/MeiGen-AI/InfiniteTalk/main/examples/single_example_image.json) · [讯飞智作](https://peiyin.xunfei.cn/seospread/ai13/index.html)
+
+预置音色已在本机 Kokoro 0.9.4、misaki 0.9.4 与 PyTorch 2.6.0 CPU 环境验证。新增 InfiniteTalk 单人 FP8 配置及权重下载命令，保留官方全精度参数。下载工具在独立模型环境使用 huggingface_hub，无需改动 FastAPI 应用依赖。部署前需用实际模型完成短片口型、声音与导出验收。[InfiniteTalk 量化推理](https://github.com/MeiGen-AI/InfiniteTalk#3-run-with-the-quantization-model-only-support-run-with-single-gpu)
+
 ## 待验证和待选型
 
 - 资料向量检索的候选为 PostgreSQL + pgvector 与 Qwen3-Embedding。以真实中文课程样本比较证据召回、章节切分与引用页码后再确认。

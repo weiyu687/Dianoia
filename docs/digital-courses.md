@@ -1,6 +1,6 @@
 # 数字课程部署与验收
 
-教师可导入最多 40 页、50 MB 的 PPT/PPTX。编辑器保留静态页预览，逐页生成和编辑讲稿，默认批量生成未填写页。PPTX 讲者备注进入模型上下文。纯图像页可根据预览手动撰写。教师可上传正面形象 PNG/JPG、3 至 30 秒的 WAV/MP3 样本和样本原文，也可选择预置形象与普通话音色。
+教师可导入最多 40 页、50 MB 的 PPT/PPTX。编辑器提供「一键生成全部讲稿」「补齐空白页」和「AI 生成本页」。整课重生成替换现有可读页面前会确认。PPTX 讲者备注进入模型上下文。纯图像页可根据预览手动撰写。教师可上传正面形象 PNG/JPG，在声音档案内保存 3 至 30 秒的 WAV/MP3 或浏览器录音并填写原文。选择档案时，用该档案标记的参考样本做语音合成。预置形象与普通话音色放在单独的只读目录。
 
 ## 本地服务
 
@@ -19,12 +19,17 @@
 | `DIANOIA_INFINITETALK_WAN` | Wan 14B 模型目录 |
 | `DIANOIA_INFINITETALK_WAV2VEC` | Chinese Wav2Vec2 模型目录 |
 | `DIANOIA_INFINITETALK_WEIGHTS` | 单人 `infinitetalk.safetensors` 路径 |
+| `DIANOIA_INFINITETALK_QUANT_DIR` | 可选，官方单人 `infinitetalk_single_fp8.safetensors` 的文件路径。配置此项后使用 FP8 和 CPU T5，略过上面的全精度单人权重 |
+
+量化模式需要同目录的量化映射及 T5 FP8 文件。安装了 `huggingface_hub` 的环境可以执行 `python backend/tools/fetch_infinitetalk_assets.py /absolute/path/to/weights` 下载单人 FP8 所需权重、编码器及分词数据。该命令从仓库根目录执行，整个文件集约 31 GB。脚本会跳过已完整下载的文件。建议使用官方 Linux CUDA 运行条件，先运行上游短样片以验证 CUDA、FlashAttention、可用内存及正确的文件版本。
 
 先按官方单 GPU 命令实际渲染一次短样片，确认主机可运行 480P 推理。显存、系统内存和速度取决于环境和权重版本。在试运行时先验收两页短课件，再验收正式课程。首版采用静态页面和旁置数字人，PPT 动画、内嵌媒体和字幕属于后续版式能力。[InfiniteTalk 安装与推理](https://github.com/MeiGen-AI/InfiniteTalk#-inference)
 
 ### 预置普通话音色
 
 在独立 Python 环境安装 `kokoro==0.9.4`、`misaki[zh]>=0.9.4,<0.10` 和 `soundfile`，按上游说明配置系统 espeak-ng。将该环境的 Python 路径填入 `DIANOIA_COURSE_KOKORO_PYTHON`，并在部署时下载 `hexgrad/Kokoro-82M-v1.1-zh` 模型与所选音色权重。预听文件是模型卡示例的前 5 秒，转为 16 kHz 单声道 WAV。图像由内置 ImageGen 生成，提示为面向高校数字讲课制作虚构中国讲师，分别为蓝灰背景蓝色西装女讲师、暖灰背景深色西装男讲师，正面半身、固定镜头、闭口、无文字。 [Kokoro 示例音频及许可](https://huggingface.co/hexgrad/Kokoro-82M-v1.1-zh/tree/f3ddd5d/samples)
+
+如果模型缓存使用独立目录，设置 `DIANOIA_COURSE_KOKORO_HOME` 为该 Hugging Face 缓存根目录。在编辑器里选择预置音色，使用「试听本页讲稿」验证当前文本的实际语音输出。试听任务只调用语音引擎。
 
 ### 教师音频样本和自定义预置音色
 

@@ -35,6 +35,23 @@ class CourseAsset(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
 
 
+class CourseVoiceFolder(Base):
+    __tablename__ = "digital_course_voice_folders"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=identifier)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(100))
+    reference_id: Mapped[str | None] = mapped_column(ForeignKey("digital_course_assets.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
+class CourseVoiceSample(Base):
+    __tablename__ = "digital_course_voice_samples"
+
+    asset_id: Mapped[str] = mapped_column(ForeignKey("digital_course_assets.id", ondelete="CASCADE"), primary_key=True)
+    folder_id: Mapped[str] = mapped_column(ForeignKey("digital_course_voice_folders.id", ondelete="CASCADE"), index=True)
+
+
 class CourseJob(Base):
     __tablename__ = "digital_course_jobs"
 
