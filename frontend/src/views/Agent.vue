@@ -34,6 +34,13 @@ async function send() {
   } catch (failure) { error.value = failure.message }
   finally { loading.value = false }
 }
+
+function handleComposerKeydown(event) {
+  if (event.key !== 'Enter' || event.isComposing || event.keyCode === 229) return
+  if (event.shiftKey && !event.ctrlKey) return
+  event.preventDefault()
+  send()
+}
 </script>
 
 <template>
@@ -53,7 +60,7 @@ async function send() {
         <span ref="scrollTarget"></span>
       </div>
       <form class="composer" @submit.prevent="send">
-        <textarea v-model="input" aria-label="对话内容" placeholder="输入消息" rows="3" maxlength="5000" @keydown.ctrl.enter.prevent="send"></textarea>
+        <textarea v-model="input" aria-label="对话内容" placeholder="输入消息 · Enter 发送，Shift+Enter 换行" rows="3" maxlength="5000" @keydown="handleComposerKeydown"></textarea>
         <p v-if="error" class="error" role="alert">{{ error }}</p>
         <div class="section-heading"><span class="muted">{{ loading ? '正在处理' : course.name }}</span><button type="submit" class="button primary icon-only" aria-label="发送" :disabled="loading || !input.trim()"><ArrowUp :size="20" /></button></div>
       </form>
