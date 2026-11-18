@@ -16,10 +16,11 @@
 | 教案文档 | `@docx-editor.dev/vue`、`core` 和 `i18n` 2.37.0，python-docx，LibreOffice | 分页在线编辑 DOCX，模板与教案副本在数据库存储。旧版 DOC 输入转为 DOCX，PDF 和 DOC 输出从当前文档版本转换。 |
 | 旧教案兼容 | python-docx、ReportLab | 原有结构化教案可转换为 DOCX 打开。已有 PDF 导出在旧数据仍使用 ReportLab，首次在分页编辑器保存后使用 DOCX 转换。 |
 | 教案生成与写作 | HTTPX、兼容 OpenAI Chat Completions 的配置端点 | 空白或模板生成与编辑器写作共用授权资料页提取。提供方与模型从环境配置读取。 |
-| 教师 Agent | LangChain Deep Agents、LangChain OpenAI 适配器、Skills | 可选安装。现有工具按教师和课程读取资料、目录、逐页正文与教案。 |
+| 教师 Agent | LangChain Deep Agents、LangChain OpenAI 适配器、Skills | 可选安装。现有工具按教师和课程读取资料、目录、逐页正文与教案。会话、消息和运行状态保存在业务数据库；通过 `DIANOIA_AGENT_CONTEXT_TOKENS` 告知模型上下文预算，Deep Agents 自带的摘要中间件负责接近该上限时压缩旧消息。 |
+| Agent 回复显示 | markdown-it 15.0.3、DOMPurify 3.4.18 | 将模型返回的 Markdown 转为 HTML，并在插入页面前清洗，保留标题、列表、表格、代码和链接。 |
 | 验证 | Python unittest、FastAPI TestClient、Vite 生产构建、Chrome | 回归覆盖关键业务、权限和保存冲突。模型调用可用替身验证。 |
 
-本轮验收环境使用 Python 3.12.14、Node.js 25.9.0、LibreOffice 26.8.2.2。前端锁文件包含 Vue 3.5.45、Vue Router 4.6.4、Vite 7.3.8、Lucide Vue 0.548.0。后端本机安装包含 FastAPI 0.162.4、Pydantic 2.14.3、Uvicorn 0.54.0、SQLAlchemy 2.0.57、pypdf 7.0.1、python-docx 1.2.0、python-pptx 1.0.2、ReportLab 4.5.1、Deep Agents 0.7.35 和 langchain-openai 1.7.4。后端版本范围见依赖文件。
+本轮验收环境使用 Python 3.12.14、Node.js 24.19.0、LibreOffice 26.8.2.2。前端锁文件包含 Vue 3.5.45、Vue Router 4.6.4、Vite 7.3.8、Lucide Vue 0.548.0。后端本机安装包含 FastAPI 0.163.1、Pydantic 2.14.3、Uvicorn 0.54.0、SQLAlchemy 2.0.57、pypdf 7.0.1、python-docx 1.2.0、python-pptx 1.0.2、ReportLab 4.5.1、Deep Agents 0.7.38 和 langchain-openai 1.8.0。后端版本范围见依赖文件。
 
 ## 选型记录
 
@@ -32,6 +33,7 @@
 | 2026-11-12 | Word 模板 AI 填充 | 使用现有模型的 JSON 响应按栏目输出，python-docx 按 `{{栏目名}}`、已知标题说明和相邻空白单元格定位写入，保留已有布局。未识别到教学栏目时在模板末尾追加生成内容。 |
 | 2026-11-13 | 模型服务配置验证 | 超算互联网 Token Plan 的 `DeepSeek-V4.1-Flash-1017-Event` 复用现有 OpenAI Chat Completions 接口。使用套餐专属密钥，修改 `.env` 后重启后端。验证了模型列表、教案生成、写作和 Agent 工具调用。 |
 | 2026-11-13 | 教师思维导图和模板 | 用户确认 Vue 3 接入 MIT 许可的 `simple-mind-map` 0.14.0-fix.3，按路由加载。相比 AntV X6，直接复用主题编辑、布局、拖拽和图片导出。FastAPI、SQLAlchemy 和现有模型接口处理版本、资料授权及结构化生成。内置教育模板使用版本化 JSON，个人模板独立保存。 |
+| 2026-11-18 | 教师 Agent 会话与生成控制 | 用户要求提供类似 Codex 的历史会话、排队和引导、停止生成、Markdown 显示以及自动上下文压缩。会话与消息使用 SQLAlchemy 写入现有数据库，接口按教师和课程授权；上下文不再固定截断 20 条，交由 Deep Agents 摘要中间件按模型上下文预算压缩。前端使用 markdown-it 渲染并以 DOMPurify 清洗模型输出，不引入独立后台服务或新的数据存储。 |
 
 中文字体和复杂对象可能影响分页。新增学校模板时可用原件对照在线编辑和 PDF 导出。[Vue 组合接口](https://www.docx-editor.dev/docs/2.x/vue/composition) · [DOCX 格式兼容](https://www.docx-editor.dev/docs/2.x/docx-fidelity) · [LibreOffice 转换格式](https://help.libreoffice.org/latest/en-US/text/shared/guide/convertfilters.html)
 

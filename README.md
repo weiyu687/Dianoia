@@ -37,6 +37,7 @@ npm run dev
 - 从教师端「试卷」导入 DOC 或 DOCX 原卷、管理 Word 模板，或按题型和资料页码组卷。进入 Word 编辑器后可确认题目并使用「AI 修改本题」。学生卷与教师答案可分别 PDF 预览、下载 DOC 或 DOCX。
 - 从「演示文稿」的「音视频」上传 MP3 或 H.264/AAC MP4，同一教师可在本课程复用单个文件。选中对象后打开「动画」可设置效果、触发方式、顺序和时长。放映时单击画面推进动画，当前页动画完成后再翻页。PPTX 内嵌音视频，PDF 显示静态媒体标签。
 - 从「数字课程」上传 PPT/PPTX、编辑逐页口播稿、选择形象和音色并导出 MP4。AI 讲稿和视频生产需要运行后台 worker，模型和媒体依赖见[数字课程部署说明](docs/digital-courses.md)。
+- 教师 Agent 按课程保存历史对话，支持 Markdown 回复、停止当前回复，以及在回复期间选择排队或在停止后按新要求引导。上下文不再固定截断 20 条消息，接近模型预算时由 Deep Agents 自动摘要旧消息。
 
 ## 配置
 
@@ -50,6 +51,7 @@ npm run dev
 | `DIANOIA_MODEL_BASE_URL` | 兼容 OpenAI Chat Completions 的 API 基础地址，通常以 `/v1` 结尾 |
 | `DIANOIA_MODEL_NAME` 和 `DIANOIA_MODEL_API_KEY` | 内容生成模型和服务凭据 |
 | `DIANOIA_AGENT_MODEL_NAME` | 可选，指定支持工具调用的 Agent 模型 |
+| `DIANOIA_AGENT_CONTEXT_TOKENS` | Agent 模型可用上下文预算，默认 96000；接近上限时自动摘要旧对话 |
 | `DIANOIA_SOFFICE` | LibreOffice 可执行文件路径，用于 Word、PPTX 和教案的 PDF 预览，以及旧 DOC 模板转换和 DOC 导出 |
 | `DIANOIA_FFPROBE` | 课件音视频上传所需的 ffprobe 可执行文件路径。留空时从 PATH 查找。部署时同时持久化 `DIANOIA_DATA_DIR/presentation-media` |
 | `DIANOIA_PDF_FONT` | 可选，旧教案 PDF 使用的中文 TrueType 字体路径 |

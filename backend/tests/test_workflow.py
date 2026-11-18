@@ -1,6 +1,8 @@
 import json
 import os
 import unittest
+from threading import Event
+from time import monotonic, sleep
 from base64 import b64decode
 from io import BytesIO
 from tempfile import TemporaryDirectory
@@ -176,6 +178,7 @@ class WorkflowTest(unittest.TestCase):
                 media_id = self.check_presentation_media(client, course)
                 mind_map, map_template = self.check_mind_maps(client, course, resource["id"])
                 exam = self.check_exams(client, course)
+                agent_conversation = self.check_agent_sessions(client, course)
                 second_teacher = login("t02", "teacher")
                 self.assertNotEqual(second_teacher["courses"][0]["id"], course)
                 self.assertEqual(client.get(route).status_code, 404)
@@ -185,6 +188,7 @@ class WorkflowTest(unittest.TestCase):
                 self.assertEqual(client.get(f"/api/mind-maps/{mind_map}").status_code, 404)
                 self.assertEqual(client.get(f"/api/mind-map-templates/{map_template}").status_code, 404)
                 self.assertEqual(client.get(f"/api/exams/{exam}").status_code, 404)
+                self.assertEqual(client.get(f"/api/agent/conversations/{agent_conversation}").status_code, 404)
                 self.assertEqual(client.get(f"/api/presentations/{presentation}").status_code, 404)
                 self.assertEqual(client.get(f"/api/presentation-templates/{slide_template}").status_code, 404)
                 foreign_deck = client.post("/api/presentations", json={
@@ -195,6 +199,85 @@ class WorkflowTest(unittest.TestCase):
                     "course_id": second_teacher["courses"][0]["id"], "title": "未授权模板",
                     "template_id": private_template,
                 }).status_code, 404)
+
+    def check_agent_sessions(self, client, course):
+        from app.agent import CURRENT_CANCEL
+        from app.db import engine
+        from app.models import AgentMessage
+        from sqlalchemy.orm import Session
+
+        answer = {
+            "text": "第一轮回复",
+            "created_mind_maps": [],
+            "created_exams": [],
+            "created_presentations": [],
+            "presentation_suggestions": [],
+        }
+        conversation = client.post("/api/agent/conversations", json={"course_id": course}).raise_for_status().json()
+        self.assertEqual(client.post(f"/api/agent/conversations/{conversation['id']}/messages", json={
+            "content": "   ",
+        }).status_code, 422)
+        with patch("app.agent.chat", return_value=answer) as model:
+            sent = client.post(f"/api/agent/conversations/{conversation['id']}/messages", json={
+                "content": "请记住本轮测试重点",
+            })
+            self.assertEqual(sent.status_code, 202, sent.text)
+            detail = self.wait_for_agent(client, conversation["id"])
+        self.assertEqual([item["status"] for item in detail["messages"]], ["complete", "complete"])
+        self.assertEqual(detail["messages"][1]["content"], "第一轮回复")
+        self.assertEqual(detail["title"], "请记住本轮测试重点")
+        self.assertGreaterEqual(len(model.call_args.args[0].messages), 1)
+
+        history = client.get(f"/api/agent/conversations?course_id={course}").raise_for_status().json()
+        self.assertEqual(history[0]["id"], conversation["id"])
+        self.assertEqual(history[0]["title"], "请记住本轮测试重点")
+
+        with Session(engine) as db:
+            for index in range(12):
+                db.add(AgentMessage(
+                    conversation_id=conversation["id"], role="user", content=f"历史问题 {index}",
+                ))
+                db.add(AgentMessage(
+                    conversation_id=conversation["id"], role="assistant", content=f"历史回答 {index}",
+                ))
+            db.commit()
+        with patch("app.agent.chat", return_value=answer) as model:
+            client.post(f"/api/agent/conversations/{conversation['id']}/messages", json={
+                "content": "继续处理长对话",
+            }).raise_for_status()
+            self.wait_for_agent(client, conversation["id"])
+        self.assertGreater(len(model.call_args.args[0].messages), 20)
+
+        stopped = Event()
+
+        def blocking_chat(*_):
+            stopped.set()
+            event = CURRENT_CANCEL.get()
+            while event is not None and not event.wait(0.01):
+                pass
+            raise RuntimeError("stopped")
+
+        cancellable = client.post("/api/agent/conversations", json={"course_id": course}).raise_for_status().json()
+        with patch("app.agent.chat", side_effect=blocking_chat):
+            response = client.post(f"/api/agent/conversations/{cancellable['id']}/messages", json={
+                "content": "停止这次回复",
+            })
+            self.assertEqual(response.status_code, 202, response.text)
+            self.assertTrue(stopped.wait(2))
+            cancelled = client.post(f"/api/agent/conversations/{cancellable['id']}/cancel").raise_for_status().json()
+            self.assertFalse(cancelled["busy"])
+            detail = self.wait_for_agent(client, cancellable["id"], terminal={"cancelled"})
+        self.assertEqual(detail["messages"][-1]["status"], "cancelled")
+        return conversation["id"]
+
+    def wait_for_agent(self, client, conversation_id, terminal=("complete", "failed", "cancelled", "interrupted")):
+        deadline = monotonic() + 5
+        while monotonic() < deadline:
+            detail = client.get(f"/api/agent/conversations/{conversation_id}").raise_for_status().json()
+            if detail["messages"] and detail["messages"][-1]["status"] in terminal:
+                return detail
+            sleep(0.05)
+        self.fail(f"Agent conversation {conversation_id} did not reach a terminal state")
 
     def check_presentations(self, client, course, resource_id):
         from app.presentation_document import Deck
