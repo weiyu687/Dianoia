@@ -32,7 +32,7 @@ Set-Location backend
 
 API 和 worker 必须读取相同的数据库、`DIANOIA_DATA_DIR`、模型配置。worker 与数字课程的 `course_worker` 是不同进程，可分别部署。任务使用数据库租约和心跳，中断超过两分钟后可恢复；失败时页面可「继续生成」，已保存批次保留。未运行 worker 时任务保持排队。生产环境应由进程管理器负责重启。
 
-SQLite 本地启动自动执行版本迁移；PostgreSQL 必须在 API/worker 启动前显式运行 `python -m app.migrate`。迁移目录 `backend/migrations` 包含旧表基线和八张题库表，已有表保留。已有部署升级前备份数据库并在副本验收；不提供自动清表式降级。数据库和私有 `question-banks` 附件目录需要共同备份，发布版本引用的图片须长期保留。
+SQLite 本地启动自动执行版本迁移；PostgreSQL 必须在 API/worker 启动前显式运行 `python -m app.migrate`。迁移目录 `backend/migrations` 包含旧表基线、八张题库表，以及合并主分支后补充的两张 Agent 会话表，当前版本为 `20261119_03`，已有表保留。已有部署升级前备份数据库并在副本验收；不提供自动清表式降级。数据库和私有 `question-banks` 附件目录需要共同备份，发布版本引用的图片须长期保留。
 
 ## 数据和权限
 

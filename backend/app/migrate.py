@@ -7,7 +7,7 @@ from sqlalchemy import inspect, text
 
 from .db import engine
 
-HEAD = "20261119_02"
+HEAD = "20261119_03"
 
 
 def migrate():

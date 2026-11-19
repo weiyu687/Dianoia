@@ -51,6 +51,7 @@ npm run dev
 | `DIANOIA_MODEL_BASE_URL` | 兼容 OpenAI Chat Completions 的 API 基础地址，通常以 `/v1` 结尾 |
 | `DIANOIA_MODEL_NAME` 和 `DIANOIA_MODEL_API_KEY` | 内容生成模型和服务凭据 |
 | `DIANOIA_AGENT_MODEL_NAME` | 可选，指定支持工具调用的 Agent 模型 |
+| `DIANOIA_AGENT_CONTEXT_TOKENS` | Agent 模型可用上下文预算，默认 96000；接近上限时自动摘要旧对话 |
 | `DIANOIA_SOFFICE` | LibreOffice 可执行文件路径，用于 Word、PPTX 和教案的 PDF 预览，以及旧 DOC 模板转换和 DOC 导出 |
 | `DIANOIA_FFPROBE` | 课件音视频上传所需的 ffprobe 可执行文件路径。留空时从 PATH 查找。部署时同时持久化 `DIANOIA_DATA_DIR/presentation-media` |
 | `DIANOIA_PDF_FONT` | 可选，旧教案 PDF 使用的中文 TrueType 字体路径 |

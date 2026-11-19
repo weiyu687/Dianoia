@@ -2,16 +2,26 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+from sqlalchemy import update
+from sqlalchemy.orm import Session
 
 from . import admin, agent, ai, auth, digital_courses, exams, lesson_templates, lessons, mind_maps, presentations, resources
-from .db import Base, engine
+from .db import engine
 from .migrate import initialize_database
 from .question_banks.router import router as question_bank_router
+from .models import AgentMessage
 
 
 @asynccontextmanager
 async def lifespan(_):
     initialize_database()
+    with Session(engine) as db:
+        db.execute(
+            update(AgentMessage)
+            .where(AgentMessage.status.in_(("thinking", "stopping")))
+            .values(status="interrupted", content="服务重启时这次回复被中断，请重新发送。")
+        )
+        db.commit()
     yield
     engine.dispose()
 
@@ -38,4 +48,5 @@ def health():
 
 for feature in (auth, admin, resources, lessons, lesson_templates, ai, mind_maps, exams, presentations, digital_courses, agent):
     app.include_router(feature.router)
+
 app.include_router(question_bank_router)
