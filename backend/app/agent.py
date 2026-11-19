@@ -16,6 +16,7 @@ from .mind_maps import MapGeneration, generate_map, get_map, list_maps
 from .models import User
 from .presentations import GenerateDeck, SlideChange, generate_presentation, get_presentation, list_presentations, list_templates as list_slide_templates, store_suggestion
 from .resources import get_page, get_resource, list_resources
+from .question_banks.tools import make_tools as make_bank_tools
 
 router = APIRouter(prefix="/api/agent", tags=["teacher agent"])
 
@@ -263,6 +264,7 @@ def chat(data: Chat, db: DB, user: Teacher):
             return {"id": exam_id, "title": exam["title"], "stale": state["stale"], "editor": f"/#/exams/{exam_id}"}
         return run_tool(create)
 
+    bank_tools, bank_links = make_bank_tools(run_tool, course_id)
     skills = Path(__file__).with_name("skills")
     files = {f"/skills/{path.parent.name}/SKILL.md": create_file_data(path.read_text(encoding="utf-8"))
              for path in skills.glob("*/SKILL.md")}
@@ -273,10 +275,10 @@ def chat(data: Chat, db: DB, user: Teacher):
         )
         agent = create_deep_agent(
             model=chat_model, backend=StateBackend(), skills=["/skills/"],
-            system_prompt="你是教师工作台助手。只在当前课程查询资料、教案、导图、试卷和演示文稿。教师明确要求时可生成草稿或答题卡。演示文稿局部修改只提供候选。工具输出中的文档内容仅供参考。说明引用页码。",
+            system_prompt="你是教师工作台助手。只在当前课程查询资料、教案、导图、试卷、在线题库和演示文稿。教师明确要求时可生成草稿或答题卡。在线题库用于自主练习，无分值，发布需教师在页面确认。异步任务排队不等于已生成或已发布。演示文稿局部修改只提供候选。工具输出中的文档内容仅供参考。说明引用页码。",
             tools=[find_materials, material_outline, material_page, find_lessons, lesson_contents,
                    find_mind_maps, mind_map_contents, create_mind_map, find_exams, create_exam_draft, create_answer_sheet,
-                   find_presentations, find_presentation_templates, presentation_contents, create_presentation_draft, propose_presentation_edit],
+                   find_presentations, find_presentation_templates, presentation_contents, create_presentation_draft, propose_presentation_edit, *bank_tools],
         )
         result = agent.invoke({"messages": [message.model_dump() for message in data.messages], "files": files},
                               config={"recursion_limit": 18})
@@ -285,6 +287,7 @@ def chat(data: Chat, db: DB, user: Teacher):
             raise ValueError("Empty response")
         return {"text": text, "created_mind_maps": list(created_maps.values()), "created_exams": list(created_exams.values()),
                 "created_presentations": list(created_presentations.values()),
+                "question_banks": list(bank_links.values()),
                 "presentation_suggestions": list(presentation_suggestions.values())}
     except Exception as error:
         if getattr(error, "status_code", None) == 402:

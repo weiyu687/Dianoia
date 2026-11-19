@@ -37,6 +37,7 @@ npm run dev
 - 从教师端「试卷」导入 DOC 或 DOCX 原卷、管理 Word 模板，或按题型和资料页码组卷。进入 Word 编辑器后可确认题目并使用「AI 修改本题」。学生卷与教师答案可分别 PDF 预览、下载 DOC 或 DOCX。
 - 从「演示文稿」的「音视频」上传 MP3 或 H.264/AAC MP4，同一教师可在本课程复用单个文件。选中对象后打开「动画」可设置效果、触发方式、顺序和时长。放映时单击画面推进动画，当前页动画完成后再翻页。PPTX 内嵌音视频，PDF 显示静态媒体标签。
 - 从「数字课程」上传 PPT/PPTX、编辑逐页口播稿、选择形象和音色并导出 MP4。个人声音档案通过 CosyVoice 2 使用参考录音及原文合成新讲稿，支持逐页试听；视频渲染使用 SadTalker。AI 讲稿和视频生产需要运行后台 worker，模型和媒体依赖见[数字课程部署说明](docs/digital-courses.md)。
+- 从「在线题库」管理自主练习题、封面、章节与子章节、答案解析，可按资料批量生成、单题修改或导入 Word 候选，核对后发布固定版本。后台生成需要独立运行 `python -m app.question_banks.worker`；升级前执行 `python -m app.migrate`。使用及部署见[在线题库说明](docs/online-question-banks.md)。学生端实际作答在后续阶段实现。
 
 ## 配置
 
@@ -62,7 +63,7 @@ Word 资料上传需要 LibreOffice Writer。系统会查找 PATH、Windows 默�
 
 超算互联网可使用 `https://api.scnet.cn/api/llm/v1` 作为基础地址。模型名填写控制台列出的模型 ID，Token Plan 套餐使用专属 API Key。[模型 API 接入文档](https://www.scnet.cn/ac/openapi/doc/2.0/moduleapi/tutorial/apicall.html) · [Token Plan 配置说明](https://www.scnet.cn/help/docs/mainsite/mass/plans/faq.html)
 
-生产部署应让前端与 `/api` 同源，并用 TLS、私有持久卷和 PostgreSQL。当前迭代先验证单校工作流，部署前需要完成数据库迁移、备份、文件处理隔离和学校真实账号接入。
+生产部署应让前端与 `/api` 同源，并用 TLS、私有持久卷和 PostgreSQL。数据库已有 Alembic 基线和版本迁移，PostgreSQL 启动前须执行 `python -m app.migrate`。当前迭代先验证单校工作流，生产部署仍需要验收迁移、备份、文件处理隔离和学校真实账号接入。
 
 ## 验证
 

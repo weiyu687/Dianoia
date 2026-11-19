@@ -5,11 +5,13 @@ from fastapi.responses import JSONResponse
 
 from . import admin, agent, ai, auth, digital_courses, exams, lesson_templates, lessons, mind_maps, presentations, resources
 from .db import Base, engine
+from .migrate import initialize_database
+from .question_banks.router import router as question_bank_router
 
 
 @asynccontextmanager
 async def lifespan(_):
-    Base.metadata.create_all(engine)
+    initialize_database()
     yield
     engine.dispose()
 
@@ -36,3 +38,4 @@ def health():
 
 for feature in (auth, admin, resources, lessons, lesson_templates, ai, mind_maps, exams, presentations, digital_courses, agent):
     app.include_router(feature.router)
+app.include_router(question_bank_router)

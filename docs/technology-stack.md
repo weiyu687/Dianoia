@@ -9,7 +9,7 @@
 | 教师端与学校管理端 | Vue 3、Vue Router 4、Vite 7、Lucide Vue | 使用独立 Vue 入口，共用组件和同源 API。教师端包含独立的 Agent 页面。Node.js 使用 22.12 或更高版本。 |
 | 业务 API | Python 3.12、FastAPI、Pydantic、Uvicorn | 请求校验、角色与任课关系校验、资料和教案接口。前后端开发时由 Vite 代理 `/api`。 |
 | 认证 | Argon2id、数据库会话、HttpOnly Cookie | 学校管理员和教师使用角色匹配的登录入口。启用 HTTPS 时配置 Secure Cookie。 |
-| 数据 | SQLAlchemy 2、SQLite、PostgreSQL 配置与 psycopg 3 | SQLite 用于本地验收。PostgreSQL 可通过环境配置接入，实际部署与迁移待验收。当前业务表在启动时创建。 |
+| 数据与迁移 | SQLAlchemy 2、SQLite、PostgreSQL 配置与 psycopg 3、Alembic 1.20.1 | SQLite 用于本地验收，启动时按版本迁移。PostgreSQL 需在启动前运行 `python -m app.migrate`，实际生产实例迁移待验收。 |
 | 虚拟数据导入 | openpyxl | XLSX 预检、导入和工号、学号及关联关系校验。 |
 | 资料处理 | python-multipart、LibreOffice Writer/Impress、pypdf、python-pptx | Word 先转 PDF，再读书签和逐页正文。文本层 PDF 直接处理。PPTX 可提取原生文本并用 LibreOffice 生成 PDF 预览。资料原件保存在私有目录。 |
 | PDF 查看 | PDF.js 5.4.624 | 资料、教案和模板共用原生 `PDFViewer`，支持连续滚动、按页渲染、页码同步和直接跳页。 |
@@ -17,6 +17,7 @@
 | 旧教案兼容 | python-docx、ReportLab | 原有结构化教案可转换为 DOCX 打开。已有 PDF 导出在旧数据仍使用 ReportLab，首次在分页编辑器保存后使用 DOCX 转换。 |
 | 教案生成与写作 | HTTPX、兼容 OpenAI Chat Completions 的配置端点 | 空白或模板生成与编辑器写作共用授权资料页提取。提供方与模型从环境配置读取。 |
 | 教师 Agent | LangChain Deep Agents、LangChain OpenAI 适配器、Skills | 可选安装。现有工具按教师和课程读取资料、目录、逐页正文与教案。 |
+| 在线题库 | Tiptap 3.34.0、现有 MathLive/KaTeX、受控 JSON、独立数据库 worker | 五类题目、层级章节、共享材料、封面、生成和不可变发布版本；教师独立页面与 Agent 共用服务。 |
 | 验证 | Python unittest、FastAPI TestClient、Vite 生产构建、Chrome | 回归覆盖关键业务、权限和保存冲突。模型调用可用替身验证。 |
 
 本轮验收环境使用 Python 3.12.14、Node.js 25.9.0、LibreOffice 26.8.2.2。前端锁文件包含 Vue 3.5.45、Vue Router 4.6.4、Vite 7.3.8、Lucide Vue 0.548.0。后端本机安装包含 FastAPI 0.162.4、Pydantic 2.14.3、Uvicorn 0.54.0、SQLAlchemy 2.0.57、pypdf 7.0.1、python-docx 1.2.0、python-pptx 1.0.2、ReportLab 4.5.1、Deep Agents 0.7.35 和 langchain-openai 1.7.4。后端版本范围见依赖文件。
@@ -115,20 +116,26 @@ Pillow `>=12.2,<14` 用于服务器端验证 PNG、JPEG 的文件格式与解码
 
 真实模型已完成验收。使用平台合成的测试参考录音及准确原文，独立 CLI 输出不同内容的 5.44 秒、24 kHz PCM16 单声道 WAV，冷启动含模型加载耗时 28.2 秒，GPU 总显存峰值 5792 MiB（桌面基线 1408 MiB）。通过常规声音档案、样本上传、指定参考和试音 API 再次输出 5.6 秒音频，耗时 20.7 秒；排队后删除原参考样本，任务仍通过快照成功。个人音色经 SadTalker 生成 5.621 秒 720p H.264/AAC 视频，耗时 125.5 秒，验证下载、范围请求、音画轨时长及人物帧变化，查看了合成画面。教师真实录音的相似度、不同录音环境和长讲稿效果需在业务使用时继续验收。
 
-### 2026-11-19｜在线题库设计建议（待技术确认，未开发）
+### 2026-11-19｜教师在线题库
+
+负责人在审阅设计后明确「开始开发」，确认采用在线题库设计 v0.1 的教师端范围。已安装并锁定 Tiptap 3.34.0 的 core、Vue 3、ProseMirror、StarterKit、表格与占位扩展；公式和私有图片采用受控节点，复用 MathLive 0.111.4、KaTeX 0.16.47 与现有 Pillow。新增 Alembic 1.20.1 管理数据库基线及本模块八张表。实际依赖见 requirements.txt、package.json 与 package-lock.json。
 
 负责人确认采用自主练习，聚焦题库、参考答案与发布，不涉及成绩。产品设计、章节/子章节、默认和上传封面、AI 与 Word 导入、发布版本、Agent 草稿工具及学生端接入条件见[在线题库设计 v0.1](online-question-bank-design.md)。当前学生名册尚无登录账号关联，认证仅接受教师/管理员；学生作答仍按既有约定在教师端之后开发，不把教师发布管理视为已完成学生答题。
 
-建议沿用 Vue 3、FastAPI、Pydantic、SQLAlchemy 与现有模型调用，新增独立的结构化题目 Schema，不复用试卷分值或 DOCX 作为在线正文。富文本候选基线为 Tiptap 3.34.0 的 MIT 开源核心及同版本 Vue/StarterKit/图片/表格扩展；2026-11-19 核对官方 npm 元数据，尚未安装。复用 MathLive 0.111.4 和 KaTeX 0.16.47，通过公式节点保存可再编辑的 LaTeX。相比继续使用 Word 分页编辑，结构化 JSON 更适合单题、选项、答案及手机阅读；相比部署完整 Moodle，更易复用现有课程、资料和 Agent 服务。[Tiptap Vue 3](https://tiptap.dev/docs/editor/getting-started/install/vue3) · [JSON 持久化](https://tiptap.dev/docs/editor/core-concepts/persistence) · [Moodle 题库](https://docs.moodle.org/501/en/Question_bank)
+沿用 Vue 3、FastAPI、Pydantic、SQLAlchemy 与现有模型调用，独立 Schema 保存单选、多选、判断、填空、解答题及答案解析。在线正文使用有节点、长度、深度及图片归属校验的 JSON，不接收可执行 HTML。公式保留 LaTeX，支持可视输入、源码、双击再编辑及多行矩阵。相比 Word 分页编辑，结构化 JSON 更适合单题、选项、答案和手机阅读；相比部署完整 Moodle，可以复用现有课程、资料和 Agent 服务。[Tiptap Vue 3](https://tiptap.dev/docs/editor/getting-started/install/vue3) · [JSON 持久化](https://tiptap.dev/docs/editor/core-concepts/persistence) · [Moodle 题库](https://docs.moodle.org/501/en/Question_bank)
 
-图片使用现有 Pillow 和私有资源引用，默认封面采用受控原创模板。正式部署采用现有 PostgreSQL 路线，建议以 Alembic 1.20.1 建立数据库基线及本模块新表迁移；该版本已核对 PyPI，未安装或运行迁移。AI 耗时任务沿用数据库任务、租约及心跳的模式，题库 worker 与 GPU 课程生产隔离。发布使用不可变题目版本与事务快照，学生读取按课程/班级和发布版本授权。技术获批后先验证编辑器、中文输入、公式、表格、图片和 JSON 保存重开，再安装并锁定依赖。
+封面提供六种原创主题及上传裁剪，服务端重新编码为 1200×675 WebP 和 400×225 缩略图，移除图片元信息。题目插图保留透明度，全部按教师权限提供。章节与共享材料存为题库内 JSON；题目版本、答案、发布记录、版本引用、附件和生成任务使用独立表。发布事务核对修订号，冻结题目、答案、封面、来源名称及范围；草稿编辑不修改已发布内容。Word 导入通过现有 python-docx/LibreOffice 链路产生可校对候选，复杂图片与布局不能自动无损迁移。
+
+Alembic 基线兼容已有本地表，不重建或清空现有业务数据；本地 SQLite 启动时升级，PostgreSQL 部署先执行 `python -m app.migrate`。已在新库及含原业务记录的 SQLite 数据库验证重复迁移和记录保留，PostgreSQL 生产实例仍需部署验收。独立 `python -m app.question_banks.worker` 处理 AI 队列，采用租约、心跳、三题分批保存及任务/序号唯一键；失败重试从已完成位置继续。运行条件和操作步骤见[在线题库说明](online-question-banks.md)。
+
+已在 Windows Chrome 验证深浅主题、封面上传裁剪、子章节与共享材料、插图、表格、公式编辑保存重开、教师预览及发布更新。真实模型根据指定讲义第 2 页生成矩阵题和页码引用。自动化回归覆盖答案校验、版本冻结、授权、导入、幂等、批次失败续做；前端生产构建与应用环境依赖检查通过。六个 Agent 工具和对应 Skill 复用题库服务，写入均为待核对草稿，发布在页面确认。学生账号及作答接口未在本轮开放。
 
 生成质量参考 2026 年 SagE-QG 对阅读理解技能与证据关联的研究，以及 2025 年高校形成性练习与反馈研究。产品采用按知识点及资料范围生成、记录来源、教师确认后发布的流程；这不代表已验证所有学科的正确率或本平台的学习效果。[SagE-QG](https://aclanthology.org/2026.findings-emnlp.424/) · [高校形成性练习与反馈](https://aclanthology.org/2025.aimecon-main.36/)
 
 ## 待验证和待选型
 
 - 资料向量检索的候选为 PostgreSQL + pgvector 与 Qwen3-Embedding。以真实中文课程样本比较证据召回、章节切分与引用页码后再确认。
-- 对话持久化、Agent 修改教案、耗时任务队列、数据库迁移、对象存储及生产部署需要单独验收。
+- 对话持久化、Agent 修改教案、其他模块耗时任务队列、对象存储及生产部署需要单独验收；数据库已建立 Alembic 基线，PostgreSQL 迁移需部署验收。
 - 知识框架、批改、学情分析及数字课程后续能力分别进入组件选型流程。
 
 后续每个组件获批后，在本页记录日期、技术及版本、选择理由、运行条件和验证结果。依赖变更同时更新依赖文件和开发日志。

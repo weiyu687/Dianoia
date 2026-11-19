@@ -26,6 +26,7 @@ async function send() {
     messages.value = [...pending, {
       role: 'assistant', content: response.text, maps: response.created_mind_maps, exams: response.created_exams,
       presentations: response.created_presentations,
+      questionBanks: response.question_banks,
       presentationSuggestions: response.presentation_suggestions,
     }]
     input.value = ''
@@ -56,6 +57,7 @@ function handleComposerKeydown(event) {
             :to="{name:'presentation',params:{id:candidate.presentation_id},query:{page:candidate.page,candidate:candidate.id}}">查看「{{ candidate.title }}」第 {{ candidate.page }} 页候选</RouterLink>
           <RouterLink v-for="map in message.maps" :key="map.id" class="text-link" :to="`/mind-maps/${map.id}`">打开导图「{{ map.title }}」</RouterLink>
           <RouterLink v-for="exam in message.exams" :key="exam.id" class="text-link" :to="`/exams/${exam.id}`">打开试卷「{{ exam.title }}」</RouterLink>
+          <RouterLink v-for="bank in message.questionBanks" :key="bank.id" class="text-link" :to="`/question-banks/${bank.id}`">打开题库「{{ bank.title }}」</RouterLink>
         </div>
         <span ref="scrollTarget"></span>
       </div>
