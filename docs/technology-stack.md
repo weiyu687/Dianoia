@@ -1,6 +1,6 @@
 # Dianoia 技术栈与选型记录
 
-更新于 2026-11-13。此文档记录实际依赖、外部运行条件及尚待选型的组件。前端依赖以 `frontend/package.json` 和 `frontend/package-lock.json` 为准，后端依赖以 `backend/requirements.txt` 和 `backend/requirements-agent.txt` 为准。
+更新于 2026-11-19。此文档记录实际依赖、外部运行条件及尚待选型的组件。前端依赖以 `frontend/package.json` 和 `frontend/package-lock.json` 为准，后端通用依赖以 `backend/requirements.txt` 和 `backend/requirements-agent.txt` 为准，专用环境依赖与约束见对应组件记录。标记为建议或待确认的方案不表示已安装。
 
 ## 当前技术栈
 
@@ -103,10 +103,34 @@ Pillow `>=12.2,<14` 用于服务器端验证 PNG、JPEG 的文件格式与解码
 
 预置音色已在本机 Kokoro 0.9.4、misaki 0.9.4 与 PyTorch 2.6.0 CPU 环境验证。新增 InfiniteTalk 单人 FP8 配置及权重下载命令，保留官方全精度参数。下载工具在独立模型环境使用 huggingface_hub，无需改动 FastAPI 应用依赖。部署前需用实际模型完成短片口型、声音与导出验收。[InfiniteTalk 量化推理](https://github.com/MeiGen-AI/InfiniteTalk#3-run-with-the-quantization-model-only-support-run-with-single-gpu)
 
+### 2026-11-19｜数字课程切换至 SadTalker
+
+按项目负责人确认，数字课程的照片驱动改用 SadTalker 512 人脸模型。它根据语音预测表情和头部运动，再把动画脸合成进原照片。比较了 InfiniteTalk 的低显存卸载和 MuseTalk 的局部口型替换。Dianoia 当前主要使用静态讲师照片和课件旁置画面，SadTalker 的完整照片模式对应这一输入形态，单档推理权重约 1.18 GB。正在验证本机 RTX 4070 SUPER 的真实渲染。讲稿、Kokoro 预置语音、可配置的个人语音合成器、SQLAlchemy 任务及 FFmpeg 合成环节继续使用现有接口。[SadTalker 论文](https://openaccess.thecvf.com/content/CVPR2023/html/Zhang_SadTalker_Learning_Realistic_3D_Motion_Coefficients_for_Stylized_Audio-Driven_Single_CVPR_2023_paper.html) · [官方权重](https://github.com/OpenTalker/SadTalker/releases/expanded_assets/v0.0.2-rc)
+
+实际采用官方源码版本 `cd4c0465ae0b54a6f85af57f5c65fec9fe23e7f8`，独立 Python 3.12、PyTorch 2.6.0 + CUDA 12.4、torchvision 0.21.0，配套版本在 `backend/requirements-sadtalker.txt`。应用启动脚本适配上游使用的旧 NumPy 别名、二维平移数组及 torchvision 导入，并调用配置的 FFmpeg。渲染默认使用 512、full、still、batch_size=1，每段最长 12 秒。两页真实验收输出 23.701 秒的 H.264/AAC 720p 视频，耗时 244 秒。RTX 4070 SUPER 测试期间总显存峰值 6966 MiB，测试前桌面占用 1170 MiB。视频轨与音频轨相差约 16 毫秒，下载与范围请求通过。正式长课程的段间过渡及不同照片仍需业务验收。个人音色克隆通过独立 TTS 驱动配置。
+
+### 2026-11-19｜个人音色零样本 TTS 配置
+
+按项目负责人本轮配置要求，落实已有 CosyVoice 驱动，采用 CosyVoice2-0.5B 的 `inference_zero_shot` 接口：输入一条参考音频、准确原文及目标讲稿，输出 24 kHz PCM WAV，再供 SadTalker 使用。声音档案保留多条样本，每次选用标记的参考样本，无需教师训练模型。官方 Kokoro 音色继续使用原有环境。相较另建 GPT-SoVITS 训练流程，此方案可直接接入已有任务快照和 WAV 协议；CosyVoice 3 是后续质量对比候选。本轮优先验证已预留的 CosyVoice 2 路径。[官方零样本示例](https://github.com/FunAudioLLM/CosyVoice/blob/074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc/example.py) · [CosyVoice 2 论文](https://arxiv.org/abs/2412.10117)
+
+推理使用独立 Python 3.12 环境，源码固定 `074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc`，Matcha-TTS 子模块固定 `dd9105b34bf2be2230f4aa1e4769fb586a3c824e`，模型固定 Hugging Face `FunAudioLLM/CosyVoice2-0.5B` 修订 `eec1ae6c79877dbd9379285cf8789c9e0879293d`。采用 PyTorch / torchaudio 2.6.0 + CUDA 12.4、transformers 4.51.3、ONNX Runtime 1.18.0、NumPy 1.26.4 和自带规范化资源的 WeText 0.2.1。固定 NumPy、SciPy 和 contourpy 版本，防止绘图等间接依赖升级破坏语音推理的二进制兼容性。配套依赖及完整验收环境约束分别记录在 `backend/requirements-cosyvoice.txt` 与 `backend/constraints-cosyvoice.txt`。本机已通过 CUDA 导入、依赖一致性及中文数字/英文数字规范化检查。[WeText 官方实现](https://github.com/pengzhendong/wetext)
+
+真实模型已完成验收。使用平台合成的测试参考录音及准确原文，独立 CLI 输出不同内容的 5.44 秒、24 kHz PCM16 单声道 WAV，冷启动含模型加载耗时 28.2 秒，GPU 总显存峰值 5792 MiB（桌面基线 1408 MiB）。通过常规声音档案、样本上传、指定参考和试音 API 再次输出 5.6 秒音频，耗时 20.7 秒；排队后删除原参考样本，任务仍通过快照成功。个人音色经 SadTalker 生成 5.621 秒 720p H.264/AAC 视频，耗时 125.5 秒，验证下载、范围请求、音画轨时长及人物帧变化，查看了合成画面。教师真实录音的相似度、不同录音环境和长讲稿效果需在业务使用时继续验收。
+
+### 2026-11-19｜在线题库设计建议（待技术确认，未开发）
+
+负责人确认采用自主练习，聚焦题库、参考答案与发布，不涉及成绩。产品设计、章节/子章节、默认和上传封面、AI 与 Word 导入、发布版本、Agent 草稿工具及学生端接入条件见[在线题库设计 v0.1](online-question-bank-design.md)。当前学生名册尚无登录账号关联，认证仅接受教师/管理员；学生作答仍按既有约定在教师端之后开发，不把教师发布管理视为已完成学生答题。
+
+建议沿用 Vue 3、FastAPI、Pydantic、SQLAlchemy 与现有模型调用，新增独立的结构化题目 Schema，不复用试卷分值或 DOCX 作为在线正文。富文本候选基线为 Tiptap 3.34.0 的 MIT 开源核心及同版本 Vue/StarterKit/图片/表格扩展；2026-11-19 核对官方 npm 元数据，尚未安装。复用 MathLive 0.111.4 和 KaTeX 0.16.47，通过公式节点保存可再编辑的 LaTeX。相比继续使用 Word 分页编辑，结构化 JSON 更适合单题、选项、答案及手机阅读；相比部署完整 Moodle，更易复用现有课程、资料和 Agent 服务。[Tiptap Vue 3](https://tiptap.dev/docs/editor/getting-started/install/vue3) · [JSON 持久化](https://tiptap.dev/docs/editor/core-concepts/persistence) · [Moodle 题库](https://docs.moodle.org/501/en/Question_bank)
+
+图片使用现有 Pillow 和私有资源引用，默认封面采用受控原创模板。正式部署采用现有 PostgreSQL 路线，建议以 Alembic 1.20.1 建立数据库基线及本模块新表迁移；该版本已核对 PyPI，未安装或运行迁移。AI 耗时任务沿用数据库任务、租约及心跳的模式，题库 worker 与 GPU 课程生产隔离。发布使用不可变题目版本与事务快照，学生读取按课程/班级和发布版本授权。技术获批后先验证编辑器、中文输入、公式、表格、图片和 JSON 保存重开，再安装并锁定依赖。
+
+生成质量参考 2026 年 SagE-QG 对阅读理解技能与证据关联的研究，以及 2025 年高校形成性练习与反馈研究。产品采用按知识点及资料范围生成、记录来源、教师确认后发布的流程；这不代表已验证所有学科的正确率或本平台的学习效果。[SagE-QG](https://aclanthology.org/2026.findings-emnlp.424/) · [高校形成性练习与反馈](https://aclanthology.org/2025.aimecon-main.36/)
+
 ## 待验证和待选型
 
 - 资料向量检索的候选为 PostgreSQL + pgvector 与 Qwen3-Embedding。以真实中文课程样本比较证据召回、章节切分与引用页码后再确认。
 - 对话持久化、Agent 修改教案、耗时任务队列、数据库迁移、对象存储及生产部署需要单独验收。
-- 知识框架、批改、学情分析、数字人和语音分别进入组件选型流程。
+- 知识框架、批改、学情分析及数字课程后续能力分别进入组件选型流程。
 
 后续每个组件获批后，在本页记录日期、技术及版本、选择理由、运行条件和验证结果。依赖变更同时更新依赖文件和开发日志。

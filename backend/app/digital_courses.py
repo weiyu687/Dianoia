@@ -14,8 +14,8 @@ from sqlalchemy import select, update
 
 from .auth import DB, Teacher, course_access
 from .course_media import (
-    ROOT, CourseMediaError, executable, import_deck, normalize_avatar, normalize_voice,
-    preset_assets, save_upload, talk_command, tts_command,
+    ROOT, CourseMediaError, import_deck, normalize_avatar, normalize_voice,
+    preset_assets, sadtalker_command, save_upload, tts_command,
 )
 from .course_models import CourseAsset, CourseJob, CourseVoiceFolder, CourseVoiceSample, DigitalCourse
 from .models import identifier, now
@@ -394,8 +394,7 @@ def start_job(project_id: str, data: StartJob, db: DB, user: Teacher):
         try:
             tts_command(voice.get("preset"))
             if data.kind == "video":
-                executable("ffmpeg")
-                talk_command()
+                sadtalker_command()
         except CourseMediaError as error:
             raise HTTPException(503, str(error)) from error
         spec.update(scripts=scripts, page=data.page if data.kind == "audio" else None, preset=voice.get("preset"),

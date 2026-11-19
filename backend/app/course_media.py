@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import shutil
+import signal
 import subprocess
 import wave
 from pathlib import Path
@@ -18,6 +19,12 @@ from .documents import convert_with_office, validate_format
 ROOT = DATA_DIR / "digital-courses"
 PRESETS = Path(__file__).parent / "course_presets"
 VOICE_PRESETS = {"zf_001": "普通话 · 女声", "zm_010": "普通话 · 男声"}
+SADTALKER_WEIGHTS = {
+    "checkpoints/SadTalker_V0.0.2_512.safetensors": 725066984,
+    "checkpoints/mapping_00109-model.pth.tar": 155779231,
+    "gfpgan/weights/alignment_WFLW_4HG.pth": 193670248,
+    "gfpgan/weights/detection_Resnet50_Final.pth": 109497761,
+}
 MAX_SLIDES = 40
 PDF_FILTER = 'pdf:impress_pdf_Export:{"ExportHiddenSlides":{"type":"boolean","value":"true"}}'
 log = logging.getLogger(__name__)
@@ -40,7 +47,8 @@ def run(args, *, cwd=None, timeout=90, heartbeat=None):
         with (Path(folder) / "process.log").open("w+b") as output:
             try:
                 with subprocess.Popen(args, cwd=cwd, stdout=output, stderr=subprocess.STDOUT,
-                                      stdin=subprocess.DEVNULL) as process:
+                                      stdin=subprocess.DEVNULL, start_new_session=os.name != "nt",
+                                      creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)) as process:
                     deadline = monotonic() + timeout
                     try:
                         while process.poll() is None:
@@ -53,7 +61,11 @@ def run(args, *, cwd=None, timeout=90, heartbeat=None):
                                     heartbeat()
                     finally:
                         if process.poll() is None:
-                            process.kill()
+                            if os.name == "nt":
+                                subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
+                            else:
+                                os.killpg(process.pid, signal.SIGKILL)
                             process.wait()
             except OSError as error:
                 raise CourseMediaError("无法启动媒体处理程序") from error
@@ -150,30 +162,24 @@ def tts_command(preset):
     raise CourseMediaError("服务器尚未配置数字课程语音合成")
 
 
-def talk_command():
-    keys = ("ROOT", "PYTHON", "WAN", "WAV2VEC", "WEIGHTS")
-    settings = [os.getenv(f"DIANOIA_INFINITETALK_{key}", "") for key in keys]
-    root, python, wan, wav2vec, weights = map(Path, settings)
-    quant = os.getenv("DIANOIA_INFINITETALK_QUANT_DIR")
-    if not all(settings[:4]) or not (quant or settings[4]) or not (root / "generate_infinitetalk.py").is_file() or not shutil.which(str(python)):
-        raise CourseMediaError("服务器尚未配置 InfiniteTalk 推理环境")
-    if not wan.is_dir() or not wav2vec.is_dir() or (not quant and not weights.is_file()):
-        raise CourseMediaError("服务器缺少 InfiniteTalk 模型权重")
-    if quant:
-        checkpoint = Path(quant).resolve()
-        files = [checkpoint, checkpoint.with_suffix(".json"), checkpoint.parent / "t5_fp8.safetensors",
-                 checkpoint.parent / "t5_map_fp8.json", wan / "config.json", wan / "Wan2.1_VAE.pth",
-                 wan / "models_clip_open-clip-xlm-roberta-large-vit-huge-14.pth", wav2vec / "config.json"]
-        if not all(path.is_file() for path in files) or not ((wav2vec / "model.safetensors").is_file()
-                                                             or (wav2vec / "pytorch_model.bin").is_file()):
-            raise CourseMediaError("InfiniteTalk FP8 权重尚未下载齐全")
-        checkpoint_args = ["--quant", "fp8", "--quant_dir", str(checkpoint), "--t5_cpu"]
-    else:
-        checkpoint_args = ["--infinitetalk_dir", str(weights.resolve())]
-    return root.resolve(), [str(python), str((root / "generate_infinitetalk.py").resolve()),
-                            "--ckpt_dir", str(wan.resolve()), "--wav2vec_dir", str(wav2vec.resolve()),
-                            "--size", "infinitetalk-480", "--mode", "streaming", "--motion_frame", "9",
-                            "--num_persistent_param_in_dit", "0", *checkpoint_args]
+def sadtalker_command():
+    root = Path(os.getenv("DIANOIA_SADTALKER_ROOT") or DATA_DIR / "tools" / "SadTalker").resolve()
+    venv = ".venv/Scripts/python.exe" if os.name == "nt" else ".venv/bin/python"
+    python = shutil.which(os.getenv("DIANOIA_SADTALKER_PYTHON") or str(root / venv))
+    script = root / "inference.py"
+    if not python or not script.is_file():
+        raise CourseMediaError("服务器尚未配置 SadTalker 推理环境")
+    for filename, size in SADTALKER_WEIGHTS.items():
+        path = root / filename
+        if not path.is_file() or path.stat().st_size != size:
+            raise CourseMediaError(f"SadTalker 权重缺失或文件不完整：{path.name}")
+    launcher = Path(__file__).resolve().parents[1] / "tools" / "run_sadtalker.py"
+    command = [python, str(launcher), executable("ffmpeg"), str(script),
+               "--checkpoint_dir", str(root / "checkpoints"), "--size", "512",
+               "--preprocess", "full", "--still", "--batch_size", "1"]
+    if os.getenv("DIANOIA_SADTALKER_CPU", "").lower() == "true":
+        command.append("--cpu")
+    return root, command
 
 
 def preset_assets():

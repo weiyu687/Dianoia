@@ -10,20 +10,41 @@
 
 ## 模型环境
 
-按 InfiniteTalk 官方仓库搭建 CUDA 环境并下载 Wan2.1-I2V-14B-480P、Chinese Wav2Vec2 与 InfiniteTalk 单人权重。设置以下变量，API 会检查文件路径，worker 调用官方脚本。
+Dianoia 使用 SadTalker 的 512 人脸模型，按完整照片模式保留讲师的原图构图。处理长讲稿时，worker 按不超过 12 秒的音频片段渲染讲师并合并，再和课件及原始讲稿音轨一起封装为 720p MP4。
 
 | 变量 | 取值 |
 | --- | --- |
-| `DIANOIA_INFINITETALK_ROOT` | 包含 `generate_infinitetalk.py` 的仓库目录 |
-| `DIANOIA_INFINITETALK_PYTHON` | 该 CUDA 环境的 Python 可执行文件绝对路径 |
-| `DIANOIA_INFINITETALK_WAN` | Wan 14B 模型目录 |
-| `DIANOIA_INFINITETALK_WAV2VEC` | Chinese Wav2Vec2 模型目录 |
-| `DIANOIA_INFINITETALK_WEIGHTS` | 单人 `infinitetalk.safetensors` 路径 |
-| `DIANOIA_INFINITETALK_QUANT_DIR` | 可选，官方单人 `infinitetalk_single_fp8.safetensors` 的文件路径。配置此项后使用 FP8 和 CPU T5，略过上面的全精度单人权重 |
+| `DIANOIA_SADTALKER_ROOT` | 含 `inference.py` 的 SadTalker 源码目录，默认 `DIANOIA_DATA_DIR/tools/SadTalker` |
+| `DIANOIA_SADTALKER_PYTHON` | 独立推理环境的 Python 绝对路径，默认使用 SadTalker 目录中的 `.venv` |
+| `DIANOIA_SADTALKER_CPU` | 设为 `true` 可显式选择 CPU，留空时使用 SadTalker 默认设备选择 |
 
-量化模式需要同目录的量化映射及 T5 FP8 文件。安装了 `huggingface_hub` 的环境可以执行 `python backend/tools/fetch_infinitetalk_assets.py /absolute/path/to/weights` 下载单人 FP8 所需权重、编码器及分词数据。该命令从仓库根目录执行，整个文件集约 31 GB。脚本会跳过已完整下载的文件。建议使用官方 Linux CUDA 运行条件，先运行上游短样片以验证 CUDA、FlashAttention、可用内存及正确的文件版本。
+Windows 示例在 Dianoia 仓库根目录运行，使用项目 Python 3.12 环境创建独立的 SadTalker 环境。GPU 需运行支持 CUDA 12.4 的 NVIDIA 驱动。
 
-先按官方单 GPU 命令实际渲染一次短样片，确认主机可运行 480P 推理。显存、系统内存和速度取决于环境和权重版本。在试运行时先验收两页短课件，再验收正式课程。首版采用静态页面和旁置数字人，PPT 动画、内嵌媒体和字幕属于后续版式能力。[InfiniteTalk 安装与推理](https://github.com/MeiGen-AI/InfiniteTalk#-inference)
+```powershell
+$root = 'backend/data/tools/SadTalker'
+git clone https://github.com/OpenTalker/SadTalker.git $root
+git -C $root checkout --detach cd4c0465ae0b54a6f85af57f5c65fec9fe23e7f8
+.\.venv\Scripts\python.exe -m venv "$root/.venv"
+$python = "$root/.venv/Scripts/python.exe"
+& $python -m pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
+& $python -m pip install 'setuptools<81' wheel
+& $python -m pip install pip==25.3
+& $python -m pip install --no-build-isolation -r backend/requirements-sadtalker.txt
+
+$checkpoints = "$root/checkpoints"
+$face = "$root/gfpgan/weights"
+New-Item -ItemType Directory -Force $checkpoints, $face | Out-Null
+$sad = 'https://github.com/OpenTalker/SadTalker/releases/download/v0.0.2-rc'
+$facexlib = 'https://github.com/xinntao/facexlib/releases/download/v0.1.0'
+Invoke-WebRequest "$sad/SadTalker_V0.0.2_512.safetensors" -OutFile "$checkpoints/SadTalker_V0.0.2_512.safetensors"
+Invoke-WebRequest "$sad/mapping_00109-model.pth.tar" -OutFile "$checkpoints/mapping_00109-model.pth.tar"
+Invoke-WebRequest "$facexlib/alignment_WFLW_4HG.pth" -OutFile "$face/alignment_WFLW_4HG.pth"
+Invoke-WebRequest "$facexlib/detection_Resnet50_Final.pth" -OutFile "$face/detection_Resnet50_Final.pth"
+```
+
+原版 CLI 在独立环境内启动。Dianoia 的启动脚本处理上游旧版库接口，并通过参数列表传给配置的 FFmpeg。推理前会检查四个官方权重的文件大小。先在编辑器选用预置形象和预置音色，制作两页短课件并检查旁置画面、口型及声音，再验收正式课程。当前成片采用静态课件画面，PPT 动画、内嵌媒体和字幕属于后续版式能力。[SadTalker 安装说明](https://github.com/OpenTalker/SadTalker/blob/main/docs/install.md) · [官方权重](https://github.com/OpenTalker/SadTalker/releases/expanded_assets/v0.0.2-rc)
+
+2026-11-19 本机验收通过。RTX 4070 SUPER 12GB、Windows、Python 3.12 与上述 CUDA 环境，经常规 API 用预置形象和 Kokoro 语音生成两页课程。成片长 23.701 秒，处理耗时 244 秒，测试期间 GPU 总显存峰值 6966 MiB。该数字包括测试前约 1170 MiB 的桌面占用。结果用于确认此配置可完成短课件，正式长课程应继续检验段间表情过渡及不同照片。
 
 ### 预置普通话音色
 
@@ -47,8 +68,33 @@
 
 程序成功时退出码为 0，将 PCM 16 位 WAV 写入 `output`。`voice_id` 为空时使用样本与原文做零样本合成。`voice_id` 有值时按部署中的音色 ID 合成，样本路径为空。可通过 `DIANOIA_COURSE_PRESET_VOICES` 指定其他预置音色 JSON 文件，格式为 `[{"id":"mandarin03","name":"普通话讲授","preview":"samples/mandarin03.wav"}]`。在与实际选定的语音引擎完成验收前，教师样本可上传试听并管理。
 
-如果部署选择 CosyVoice2-0.5B，可使用仓库中的参考驱动。按 CosyVoice 官方说明安装独立环境与模型，把下面四个路径换成部署主机上的实际路径。驱动处理教师上传样本，内置预设继续使用 Kokoro 环境。[CosyVoice2-0.5B 模型卡](https://huggingface.co/FunAudioLLM/CosyVoice2-0.5B)
+### CosyVoice 2 个人音色
+
+使用 CosyVoice2-0.5B 做零样本合成。每次使用一条参考录音及其原文，不需要训练。声音档案中的多条样本用于挑选更合适的参考，不会自动合并训练。内置预设继续使用 Kokoro 环境。[CosyVoice2-0.5B 模型卡](https://huggingface.co/FunAudioLLM/CosyVoice2-0.5B)
+
+在仓库根目录为 GPU 推理安装独立环境。Windows 验证配置为 Python 3.12、PyTorch / torchaudio 2.6.0 + CUDA 12.4；其余固定依赖见 `backend/requirements-cosyvoice.txt`。不要把这些推理依赖安装进 Web API 环境。
+
+```powershell
+$cosy = 'backend/data/tools/CosyVoice'
+git clone https://github.com/FunAudioLLM/CosyVoice.git $cosy
+git -C $cosy checkout --detach 074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc
+git -C $cosy submodule update --init --recursive
+.\.venv\Scripts\python.exe -m venv "$cosy/.venv"
+$cosyPython = "$cosy/.venv/Scripts/python.exe"
+& $cosyPython -m pip install torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+& $cosyPython -m pip install setuptools==78.1.0 wheel==0.48.0
+& $cosyPython -m pip install --no-build-isolation -r backend/requirements-cosyvoice.txt -c backend/constraints-cosyvoice.txt
+& $cosyPython -c "from huggingface_hub import snapshot_download; snapshot_download('FunAudioLLM/CosyVoice2-0.5B', revision='eec1ae6c79877dbd9379285cf8789c9e0879293d', local_dir='backend/data/tools/CosyVoice/models/CosyVoice2-0.5B', allow_patterns=['*.pt', 'cosyvoice2.yaml', 'campplus.onnx', 'speech_tokenizer_v2.onnx', 'CosyVoice-BlankEN/*'])"
+```
+
+上述推理文件总计约 4.07 GB（3.79 GiB），不含 Python/CUDA 运行环境。文本规范化采用自带 FST 资源的 WeText 0.2.1，无需在首次讲稿合成时从 ModelScope 下载词法模型。驱动启动前检查必要权重的大小，避免不完整下载直接进入推理。GPU 可用时使用 FP16；任务结束后独立推理进程退出，释放显存，再进入 SadTalker 渲染。
+
+在 `backend/.env` 配置下述四个绝对路径，并重启 API 和 course worker。Linux 示例可换成本机路径；Windows JSON 数组内使用正斜杠。
 
 ```dotenv
 DIANOIA_COURSE_TTS_COMMAND='["/opt/cosyvoice-env/bin/python","/opt/dianoia/backend/tools/course_cosyvoice.py","/opt/CosyVoice","/opt/models/CosyVoice2-0.5B"]'
 ```
+
+使用步骤：进入「数字课程 → 音色与样本库 → 我的」，新建声音档案，录制或上传 3–30 秒清晰的单人录音，填写准确原文，指定「合成参考」。建议自然朗读 6–15 秒，保留完整句子。在课程编辑器选择该声音档案，保存后点击「试听本页讲稿」，确认新讲稿的读音与音色，再提交视频。试音和正式生产使用相同参考音频与原文；排队时复制参考录音作为任务快照。
+
+2026-11-19 已在本机配置并重启 API 和 worker。参考录音使用平台合成的测试音频，独立 CLI 生成不同内容的 5.44 秒 WAV，耗时 28.2 秒；声音档案试音 API 输出 5.6 秒 WAV，耗时 20.7 秒，删除原样本后任务快照仍可使用。相同个人音色通过 SadTalker 导出 5.621 秒的 1280×720 H.264/AAC MP4，视频任务耗时 125.5 秒。上述耗时包含每次独立进程的模型加载，仅用于描述短讲稿测试，不代表长课程速度或真实教师录音的音色相似度。
