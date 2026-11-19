@@ -107,10 +107,18 @@ Pillow `>=12.2,<14` 用于服务器端验证 PNG、JPEG 的文件格式与解码
 
 实际采用官方源码版本 `cd4c0465ae0b54a6f85af57f5c65fec9fe23e7f8`，独立 Python 3.12、PyTorch 2.6.0 + CUDA 12.4、torchvision 0.21.0，配套版本在 `backend/requirements-sadtalker.txt`。应用启动脚本适配上游使用的旧 NumPy 别名、二维平移数组及 torchvision 导入，并调用配置的 FFmpeg。渲染默认使用 512、full、still、batch_size=1，每段最长 12 秒。两页真实验收输出 23.701 秒的 H.264/AAC 720p 视频，耗时 244 秒。RTX 4070 SUPER 测试期间总显存峰值 6966 MiB，测试前桌面占用 1170 MiB。视频轨与音频轨相差约 16 毫秒，下载与范围请求通过。正式长课程的段间过渡及不同照片仍需业务验收。个人音色克隆通过独立 TTS 驱动配置。
 
+### 2026-11-19｜个人音色零样本 TTS 配置
+
+按项目负责人本轮配置要求，落实已有 CosyVoice 驱动，采用 CosyVoice2-0.5B 的 `inference_zero_shot` 接口：输入一条参考音频、准确原文及目标讲稿，输出 24 kHz PCM WAV，再供 SadTalker 使用。声音档案保留多条样本，每次选用标记的参考样本，无需教师训练模型。官方 Kokoro 音色继续使用原有环境。相较另建 GPT-SoVITS 训练流程，此方案可直接接入已有任务快照和 WAV 协议；CosyVoice 3 是后续质量对比候选。本轮优先验证已预留的 CosyVoice 2 路径。[官方零样本示例](https://github.com/FunAudioLLM/CosyVoice/blob/074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc/example.py) · [CosyVoice 2 论文](https://arxiv.org/abs/2412.10117)
+
+推理使用独立 Python 3.12 环境，源码固定 `074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc`，Matcha-TTS 子模块固定 `dd9105b34bf2be2230f4aa1e4769fb586a3c824e`，模型固定 Hugging Face `FunAudioLLM/CosyVoice2-0.5B` 修订 `eec1ae6c79877dbd9379285cf8789c9e0879293d`。采用 PyTorch / torchaudio 2.6.0 + CUDA 12.4、transformers 4.51.3、ONNX Runtime 1.18.0、NumPy 1.26.4 和自带规范化资源的 WeText 0.2.1。固定 NumPy、SciPy 和 contourpy 版本，防止绘图等间接依赖升级破坏语音推理的二进制兼容性。配套依赖及完整验收环境约束分别记录在 `backend/requirements-cosyvoice.txt` 与 `backend/constraints-cosyvoice.txt`。本机已通过 CUDA 导入、依赖一致性及中文数字/英文数字规范化检查。[WeText 官方实现](https://github.com/pengzhendong/wetext)
+
+真实模型已完成验收。使用平台合成的测试参考录音及准确原文，独立 CLI 输出不同内容的 5.44 秒、24 kHz PCM16 单声道 WAV，冷启动含模型加载耗时 28.2 秒，GPU 总显存峰值 5792 MiB（桌面基线 1408 MiB）。通过常规声音档案、样本上传、指定参考和试音 API 再次输出 5.6 秒音频，耗时 20.7 秒；排队后删除原参考样本，任务仍通过快照成功。个人音色经 SadTalker 生成 5.621 秒 720p H.264/AAC 视频，耗时 125.5 秒，验证下载、范围请求、音画轨时长及人物帧变化，查看了合成画面。教师真实录音的相似度、不同录音环境和长讲稿效果需在业务使用时继续验收。
+
 ## 待验证和待选型
 
 - 资料向量检索的候选为 PostgreSQL + pgvector 与 Qwen3-Embedding。以真实中文课程样本比较证据召回、章节切分与引用页码后再确认。
 - 对话持久化、Agent 修改教案、耗时任务队列、数据库迁移、对象存储及生产部署需要单独验收。
-- 知识框架、批改、学情分析、数字人和语音分别进入组件选型流程。
+- 知识框架、批改、学情分析及数字课程后续能力分别进入组件选型流程。
 
 后续每个组件获批后，在本页记录日期、技术及版本、选择理由、运行条件和验证结果。依赖变更同时更新依赖文件和开发日志。

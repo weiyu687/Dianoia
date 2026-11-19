@@ -128,6 +128,7 @@ async function submit(event) {
     </section>
     <template v-else>
     <section v-if="tab === 'voice' && source === 'mine'" class="digital-voice-folders">
+      <p class="muted">每个档案可保存多条录音。选择一条「合成参考」，在课程编辑器选用该档案后即可试听新讲稿；样本文字须与实际录音一致。</p>
       <article v-for="folder in folders" :key="folder.id" class="panel digital-folder">
         <header class="section-heading">
           <div><h3><FolderOpen :size="18" /> {{ folder.name }}</h3><small>{{ folder.samples.length }} 条样本</small></div>

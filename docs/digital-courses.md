@@ -68,8 +68,33 @@ Invoke-WebRequest "$facexlib/detection_Resnet50_Final.pth" -OutFile "$face/detec
 
 程序成功时退出码为 0，将 PCM 16 位 WAV 写入 `output`。`voice_id` 为空时使用样本与原文做零样本合成。`voice_id` 有值时按部署中的音色 ID 合成，样本路径为空。可通过 `DIANOIA_COURSE_PRESET_VOICES` 指定其他预置音色 JSON 文件，格式为 `[{"id":"mandarin03","name":"普通话讲授","preview":"samples/mandarin03.wav"}]`。在与实际选定的语音引擎完成验收前，教师样本可上传试听并管理。
 
-如果部署选择 CosyVoice2-0.5B，可使用仓库中的参考驱动。按 CosyVoice 官方说明安装独立环境与模型，把下面四个路径换成部署主机上的实际路径。驱动处理教师上传样本，内置预设继续使用 Kokoro 环境。[CosyVoice2-0.5B 模型卡](https://huggingface.co/FunAudioLLM/CosyVoice2-0.5B)
+### CosyVoice 2 个人音色
+
+使用 CosyVoice2-0.5B 做零样本合成。每次使用一条参考录音及其原文，不需要训练。声音档案中的多条样本用于挑选更合适的参考，不会自动合并训练。内置预设继续使用 Kokoro 环境。[CosyVoice2-0.5B 模型卡](https://huggingface.co/FunAudioLLM/CosyVoice2-0.5B)
+
+在仓库根目录为 GPU 推理安装独立环境。Windows 验证配置为 Python 3.12、PyTorch / torchaudio 2.6.0 + CUDA 12.4；其余固定依赖见 `backend/requirements-cosyvoice.txt`。不要把这些推理依赖安装进 Web API 环境。
+
+```powershell
+$cosy = 'backend/data/tools/CosyVoice'
+git clone https://github.com/FunAudioLLM/CosyVoice.git $cosy
+git -C $cosy checkout --detach 074ca6dc9e80a2f424f1f74b48bdd7d3fea531cc
+git -C $cosy submodule update --init --recursive
+.\.venv\Scripts\python.exe -m venv "$cosy/.venv"
+$cosyPython = "$cosy/.venv/Scripts/python.exe"
+& $cosyPython -m pip install torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+& $cosyPython -m pip install setuptools==78.1.0 wheel==0.48.0
+& $cosyPython -m pip install --no-build-isolation -r backend/requirements-cosyvoice.txt -c backend/constraints-cosyvoice.txt
+& $cosyPython -c "from huggingface_hub import snapshot_download; snapshot_download('FunAudioLLM/CosyVoice2-0.5B', revision='eec1ae6c79877dbd9379285cf8789c9e0879293d', local_dir='backend/data/tools/CosyVoice/models/CosyVoice2-0.5B', allow_patterns=['*.pt', 'cosyvoice2.yaml', 'campplus.onnx', 'speech_tokenizer_v2.onnx', 'CosyVoice-BlankEN/*'])"
+```
+
+上述推理文件总计约 4.07 GB（3.79 GiB），不含 Python/CUDA 运行环境。文本规范化采用自带 FST 资源的 WeText 0.2.1，无需在首次讲稿合成时从 ModelScope 下载词法模型。驱动启动前检查必要权重的大小，避免不完整下载直接进入推理。GPU 可用时使用 FP16；任务结束后独立推理进程退出，释放显存，再进入 SadTalker 渲染。
+
+在 `backend/.env` 配置下述四个绝对路径，并重启 API 和 course worker。Linux 示例可换成本机路径；Windows JSON 数组内使用正斜杠。
 
 ```dotenv
 DIANOIA_COURSE_TTS_COMMAND='["/opt/cosyvoice-env/bin/python","/opt/dianoia/backend/tools/course_cosyvoice.py","/opt/CosyVoice","/opt/models/CosyVoice2-0.5B"]'
 ```
+
+使用步骤：进入「数字课程 → 音色与样本库 → 我的」，新建声音档案，录制或上传 3–30 秒清晰的单人录音，填写准确原文，指定「合成参考」。建议自然朗读 6–15 秒，保留完整句子。在课程编辑器选择该声音档案，保存后点击「试听本页讲稿」，确认新讲稿的读音与音色，再提交视频。试音和正式生产使用相同参考音频与原文；排队时复制参考录音作为任务快照。
+
+2026-11-19 已在本机配置并重启 API 和 worker。参考录音使用平台合成的测试音频，独立 CLI 生成不同内容的 5.44 秒 WAV，耗时 28.2 秒；声音档案试音 API 输出 5.6 秒 WAV，耗时 20.7 秒，删除原样本后任务快照仍可使用。相同个人音色通过 SadTalker 导出 5.621 秒的 1280×720 H.264/AAC MP4，视频任务耗时 125.5 秒。上述耗时包含每次独立进程的模型加载，仅用于描述短讲稿测试，不代表长课程速度或真实教师录音的音色相似度。
