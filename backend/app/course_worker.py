@@ -3,7 +3,6 @@
 import argparse
 import json
 import logging
-import math
 import os
 import shutil
 import wave
@@ -14,7 +13,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from .ai import generate
-from .course_media import CourseMediaError, audio_seconds, executable, run, talk_command, tts_command
+from .course_media import CourseMediaError, audio_seconds, executable, run, sadtalker_command, tts_command
 from .course_models import CourseJob, DigitalCourse
 from .db import Base, engine
 from .digital_courses import LEASE, job_path, project_path
@@ -109,20 +108,41 @@ def make_audio(folder, text, spec, heartbeat):
     return output
 
 
-def animate_avatar(folder, audio, heartbeat):
-    root, command = talk_command()
-    request = folder / "talk.json"
-    request.write_text(json.dumps({
-        "prompt": "A professional instructor speaking naturally to a fixed camera, steady lighting, no camera movement.",
-        "cond_video": (folder.parent / "avatar.png").as_posix(),
-        "cond_audio": {"person1": audio.as_posix()},
-    }), encoding="utf-8")
+def animate_avatar(folder, audio, heartbeat, progress_chunk):
+    root, command = sadtalker_command()
+    portrait = folder.parent / "avatar.png"
+    segments = []
+    # SadTalker keeps a clip's generated frames in memory. Partition on whole seconds
+    # so that all non-final parts also align with the upstream 25 fps time base.
+    with wave.open(str(audio), "rb") as source:
+        second = source.getframerate()
+        batch = second * 12
+        remaining = source.getnframes()
+        total = (remaining + batch - 1) // batch
+        for index in range(1, total + 1):
+            chunk = folder / f"talk-{index}"
+            chunk.mkdir()
+            part = chunk / "speech.wav"
+            take = batch - second if 0 < remaining - batch < second else min(batch, remaining)
+            with wave.open(str(part), "wb") as target:
+                target.setparams(source.getparams())
+                target.writeframes(source.readframes(take))
+            remaining -= take
+            progress_chunk(index, total)
+            run([*command, "--source_image", str(portrait), "--driven_audio", str(part), "--result_dir", str(chunk)],
+                cwd=root, timeout=900, heartbeat=heartbeat)
+            output = list(chunk.glob("*.mp4"))
+            if len(output) != 1 or not output[0].stat().st_size:
+                raise CourseMediaError("SadTalker 未输出视频，请检查讲师照片是否有清晰可见的正脸")
+            segments.append(output[0])
+    if len(segments) == 1:
+        return segments[0]
+    manifest = folder / "avatar-segments.txt"
+    entries = [f"file '{clip.relative_to(folder).as_posix()}'" for clip in segments]
+    manifest.write_text("\n".join(entries) + "\n", encoding="utf-8")
     output = folder / "avatar.mp4"
-    run([*command, "--input_json", str(request), "--audio_save_dir", str(folder / "conditioning"),
-         "--max_frame_num", str(max(81, math.ceil(audio_seconds(audio) * 25) + 81)),
-         "--save_file", str(output.with_suffix(""))], cwd=root, timeout=7200, heartbeat=heartbeat)
-    if not output.is_file():
-        raise CourseMediaError("InfiniteTalk 未输出可用视频")
+    run([executable("ffmpeg"), "-hide_banner", "-loglevel", "error", "-f", "concat", "-i", manifest.name,
+         "-map", "0:v:0", "-c", "copy", output.name], cwd=folder, timeout=120, heartbeat=heartbeat)
     return output
 
 
@@ -133,8 +153,8 @@ def compose_slide(folder, image, avatar, audio, heartbeat):
         "pad=960:720:(ow-iw)/2:(oh-ih)/2:color=0x172537,setsar=1[slide];"
         "[1:v]scale=304:448:force_original_aspect_ratio=decrease:force_divisible_by=2,"
         "pad=320:720:(ow-iw)/2:(oh-ih)/2:color=0x172537,setsar=1,fps=25,"
-        "tpad=stop_mode=clone:stop_duration=300[avatar];"
-        "[slide][avatar]hstack=inputs=2,format=yuv420p[video]"
+        "tpad=stop_mode=clone:stop_duration=0.08[avatar];"
+        "[slide][avatar]hstack=inputs=2:shortest=1,format=yuv420p[video]"
     )
     run([executable("ffmpeg"), "-hide_banner", "-loglevel", "error", "-loop", "1", "-framerate", "25",
          "-i", str(image), "-i", str(avatar), "-i", str(audio), "-filter_complex_threads", "1",
@@ -155,8 +175,11 @@ def make_video(job_id, project_id, spec):
         page.mkdir()
         progress(job_id, stage=f"第 {index} 页 · 合成语音")
         audio = make_audio(page, script, spec, heartbeat)
-        progress(job_id, stage=f"第 {index} 页 · InfiniteTalk 生成口型")
-        avatar = animate_avatar(page, audio, heartbeat)
+
+        def update_render(part, total):
+            progress(job_id, stage=f"第 {index} 页 · SadTalker 渲染讲师画面 {part}/{total}")
+
+        avatar = animate_avatar(page, audio, heartbeat, update_render)
         progress(job_id, stage=f"第 {index} 页 · 合成课件画面")
         compose_slide(page, project_path(project_id) / f"page-{index}.png", avatar, audio, heartbeat)
         files.append(f"file 'page-{index}/segment.mp4'")

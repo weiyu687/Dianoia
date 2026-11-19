@@ -101,6 +101,12 @@ Pillow `>=12.2,<14` 用于服务器端验证 PNG、JPEG 的文件格式与解码
 
 预置音色已在本机 Kokoro 0.9.4、misaki 0.9.4 与 PyTorch 2.6.0 CPU 环境验证。新增 InfiniteTalk 单人 FP8 配置及权重下载命令，保留官方全精度参数。下载工具在独立模型环境使用 huggingface_hub，无需改动 FastAPI 应用依赖。部署前需用实际模型完成短片口型、声音与导出验收。[InfiniteTalk 量化推理](https://github.com/MeiGen-AI/InfiniteTalk#3-run-with-the-quantization-model-only-support-run-with-single-gpu)
 
+### 2026-11-19｜数字课程切换至 SadTalker
+
+按项目负责人确认，数字课程的照片驱动改用 SadTalker 512 人脸模型。它根据语音预测表情和头部运动，再把动画脸合成进原照片。比较了 InfiniteTalk 的低显存卸载和 MuseTalk 的局部口型替换。Dianoia 当前主要使用静态讲师照片和课件旁置画面，SadTalker 的完整照片模式对应这一输入形态，单档推理权重约 1.18 GB。正在验证本机 RTX 4070 SUPER 的真实渲染。讲稿、Kokoro 预置语音、可配置的个人语音合成器、SQLAlchemy 任务及 FFmpeg 合成环节继续使用现有接口。[SadTalker 论文](https://openaccess.thecvf.com/content/CVPR2023/html/Zhang_SadTalker_Learning_Realistic_3D_Motion_Coefficients_for_Stylized_Audio-Driven_Single_CVPR_2023_paper.html) · [官方权重](https://github.com/OpenTalker/SadTalker/releases/expanded_assets/v0.0.2-rc)
+
+实际采用官方源码版本 `cd4c0465ae0b54a6f85af57f5c65fec9fe23e7f8`，独立 Python 3.12、PyTorch 2.6.0 + CUDA 12.4、torchvision 0.21.0，配套版本在 `backend/requirements-sadtalker.txt`。应用启动脚本适配上游使用的旧 NumPy 别名、二维平移数组及 torchvision 导入，并调用配置的 FFmpeg。渲染默认使用 512、full、still、batch_size=1，每段最长 12 秒。两页真实验收输出 23.701 秒的 H.264/AAC 720p 视频，耗时 244 秒。RTX 4070 SUPER 测试期间总显存峰值 6966 MiB，测试前桌面占用 1170 MiB。视频轨与音频轨相差约 16 毫秒，下载与范围请求通过。正式长课程的段间过渡及不同照片仍需业务验收。个人音色克隆通过独立 TTS 驱动配置。
+
 ## 待验证和待选型
 
 - 资料向量检索的候选为 PostgreSQL + pgvector 与 Qwen3-Embedding。以真实中文课程样本比较证据召回、章节切分与引用页码后再确认。

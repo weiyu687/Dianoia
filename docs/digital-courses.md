@@ -10,20 +10,41 @@
 
 ## 模型环境
 
-按 InfiniteTalk 官方仓库搭建 CUDA 环境并下载 Wan2.1-I2V-14B-480P、Chinese Wav2Vec2 与 InfiniteTalk 单人权重。设置以下变量，API 会检查文件路径，worker 调用官方脚本。
+Dianoia 使用 SadTalker 的 512 人脸模型，按完整照片模式保留讲师的原图构图。处理长讲稿时，worker 按不超过 12 秒的音频片段渲染讲师并合并，再和课件及原始讲稿音轨一起封装为 720p MP4。
 
 | 变量 | 取值 |
 | --- | --- |
-| `DIANOIA_INFINITETALK_ROOT` | 包含 `generate_infinitetalk.py` 的仓库目录 |
-| `DIANOIA_INFINITETALK_PYTHON` | 该 CUDA 环境的 Python 可执行文件绝对路径 |
-| `DIANOIA_INFINITETALK_WAN` | Wan 14B 模型目录 |
-| `DIANOIA_INFINITETALK_WAV2VEC` | Chinese Wav2Vec2 模型目录 |
-| `DIANOIA_INFINITETALK_WEIGHTS` | 单人 `infinitetalk.safetensors` 路径 |
-| `DIANOIA_INFINITETALK_QUANT_DIR` | 可选，官方单人 `infinitetalk_single_fp8.safetensors` 的文件路径。配置此项后使用 FP8 和 CPU T5，略过上面的全精度单人权重 |
+| `DIANOIA_SADTALKER_ROOT` | 含 `inference.py` 的 SadTalker 源码目录，默认 `DIANOIA_DATA_DIR/tools/SadTalker` |
+| `DIANOIA_SADTALKER_PYTHON` | 独立推理环境的 Python 绝对路径，默认使用 SadTalker 目录中的 `.venv` |
+| `DIANOIA_SADTALKER_CPU` | 设为 `true` 可显式选择 CPU，留空时使用 SadTalker 默认设备选择 |
 
-量化模式需要同目录的量化映射及 T5 FP8 文件。安装了 `huggingface_hub` 的环境可以执行 `python backend/tools/fetch_infinitetalk_assets.py /absolute/path/to/weights` 下载单人 FP8 所需权重、编码器及分词数据。该命令从仓库根目录执行，整个文件集约 31 GB。脚本会跳过已完整下载的文件。建议使用官方 Linux CUDA 运行条件，先运行上游短样片以验证 CUDA、FlashAttention、可用内存及正确的文件版本。
+Windows 示例在 Dianoia 仓库根目录运行，使用项目 Python 3.12 环境创建独立的 SadTalker 环境。GPU 需运行支持 CUDA 12.4 的 NVIDIA 驱动。
 
-先按官方单 GPU 命令实际渲染一次短样片，确认主机可运行 480P 推理。显存、系统内存和速度取决于环境和权重版本。在试运行时先验收两页短课件，再验收正式课程。首版采用静态页面和旁置数字人，PPT 动画、内嵌媒体和字幕属于后续版式能力。[InfiniteTalk 安装与推理](https://github.com/MeiGen-AI/InfiniteTalk#-inference)
+```powershell
+$root = 'backend/data/tools/SadTalker'
+git clone https://github.com/OpenTalker/SadTalker.git $root
+git -C $root checkout --detach cd4c0465ae0b54a6f85af57f5c65fec9fe23e7f8
+.\.venv\Scripts\python.exe -m venv "$root/.venv"
+$python = "$root/.venv/Scripts/python.exe"
+& $python -m pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
+& $python -m pip install 'setuptools<81' wheel
+& $python -m pip install pip==25.3
+& $python -m pip install --no-build-isolation -r backend/requirements-sadtalker.txt
+
+$checkpoints = "$root/checkpoints"
+$face = "$root/gfpgan/weights"
+New-Item -ItemType Directory -Force $checkpoints, $face | Out-Null
+$sad = 'https://github.com/OpenTalker/SadTalker/releases/download/v0.0.2-rc'
+$facexlib = 'https://github.com/xinntao/facexlib/releases/download/v0.1.0'
+Invoke-WebRequest "$sad/SadTalker_V0.0.2_512.safetensors" -OutFile "$checkpoints/SadTalker_V0.0.2_512.safetensors"
+Invoke-WebRequest "$sad/mapping_00109-model.pth.tar" -OutFile "$checkpoints/mapping_00109-model.pth.tar"
+Invoke-WebRequest "$facexlib/alignment_WFLW_4HG.pth" -OutFile "$face/alignment_WFLW_4HG.pth"
+Invoke-WebRequest "$facexlib/detection_Resnet50_Final.pth" -OutFile "$face/detection_Resnet50_Final.pth"
+```
+
+原版 CLI 在独立环境内启动。Dianoia 的启动脚本处理上游旧版库接口，并通过参数列表传给配置的 FFmpeg。推理前会检查四个官方权重的文件大小。先在编辑器选用预置形象和预置音色，制作两页短课件并检查旁置画面、口型及声音，再验收正式课程。当前成片采用静态课件画面，PPT 动画、内嵌媒体和字幕属于后续版式能力。[SadTalker 安装说明](https://github.com/OpenTalker/SadTalker/blob/main/docs/install.md) · [官方权重](https://github.com/OpenTalker/SadTalker/releases/expanded_assets/v0.0.2-rc)
+
+2026-11-19 本机验收通过。RTX 4070 SUPER 12GB、Windows、Python 3.12 与上述 CUDA 环境，经常规 API 用预置形象和 Kokoro 语音生成两页课程。成片长 23.701 秒，处理耗时 244 秒，测试期间 GPU 总显存峰值 6966 MiB。该数字包括测试前约 1170 MiB 的桌面占用。结果用于确认此配置可完成短课件，正式长课程应继续检验段间表情过渡及不同照片。
 
 ### 预置普通话音色
 
