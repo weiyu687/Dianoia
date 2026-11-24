@@ -9,7 +9,7 @@ from time import sleep
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
-from ..db import engine
+from ..db import DATA_DIR, engine
 from ..models import now
 from .models import LearningImportBatch, LearningObservation
 from .parser import read_parsed
@@ -39,7 +39,7 @@ def process(batch_id):
         batch = db.get(LearningImportBatch, batch_id)
         if not batch or batch.status != "processing":
             return
-        path = batch.parsed_path
+        path = DATA_DIR / batch.parsed_path
         try:
             rows = read_parsed(path)
             mapping = MappingConfig.model_validate(batch.mapping)

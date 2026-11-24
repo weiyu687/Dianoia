@@ -46,7 +46,7 @@ CSV、XLS、XLSX 数据层新增 pandas 3.1.1 和 xlrd 2.0.2；复用原 openpyx
 
 迁移 `20261123_04` 建立批次、指标事实、教师映射模板、教师大屏模板、教师计划及四类内容的发布快照。新库和本地数据库升级流程沿用 Alembic；PostgreSQL 部署须先执行 `python -m app.migrate`。学生身份、学生侧资源 API 和计划定向发送没有在本首版实现；共享发布快照目前由教师 API 管理，学生访问须在独立学生端验收。
 
-用于本地验收的虚拟文件在 `frontend/public/test-data/learning-analytics/`。前端生产构建成功，Python 3.12 编译检查和 FastAPI 应用导入检查成功；尚未运行批次迁移后的端到端导入、统计图表及 Worker 恢复流程，需按教师验收继续确认。
+用于本地验收的虚拟文件在 `frontend/public/test-data/learning-analytics/`。前端生产构建成功，Python 3.12 编译检查和 FastAPI 应用导入检查成功。排查排队问题时修复了 worker 对私有数据目录相对路径的解析，并恢复处理了两个积压批次；自动化测试套件未运行，图表交互与其他格式的导入仍待教师验收。
 
 中文字体和复杂对象可能影响分页。新增学校模板时可用原件对照在线编辑和 PDF 导出。[Vue 组合接口](https://www.docx-editor.dev/docs/2.x/vue/composition) · [DOCX 格式兼容](https://www.docx-editor.dev/docs/2.x/docx-fidelity) · [LibreOffice 转换格式](https://help.libreoffice.org/latest/en-US/text/shared/guide/convertfilters.html)
 
