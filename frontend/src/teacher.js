@@ -26,6 +26,7 @@ const router = createRouter({
     { path: '/presentations/:id', name: 'presentation', component: () => import('./views/PresentationEditor.vue') },
     { path: '/digital-courses', name: 'digitalCourses', component: () => import('./views/DigitalCourses.vue') },
     { path: '/digital-courses/:id', name: 'digitalCourse', component: () => import('./views/DigitalCourseEditor.vue') },
+    { path: '/learning-analytics', name: 'learningAnalytics', component: () => import('./views/LearningAnalytics.vue') },
     { path: '/exam-templates', name: 'examTemplates', props: { exam: true }, component: () => import('./views/LessonTemplates.vue') },
     { path: '/mind-maps', name: 'mindMaps', component: () => import('./views/MindMaps.vue') },
     { path: '/mind-maps/:id', name: 'mindMap', component: () => import('./views/MindMapEditor.vue') },

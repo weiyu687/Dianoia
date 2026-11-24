@@ -1,14 +1,14 @@
 # Dianoia 技术栈与选型记录
 
-更新于 2026-11-19。此文档记录实际依赖、外部运行条件及尚待选型的组件。前端依赖以 `frontend/package.json` 和 `frontend/package-lock.json` 为准，后端通用依赖以 `backend/requirements.txt` 和 `backend/requirements-agent.txt` 为准，专用环境依赖与约束见对应组件记录。标记为建议或待确认的方案不表示已安装。
+更新于 2026-11-24。此文档记录实际依赖、外部运行条件及待选型组件。前端依赖以 `frontend/package.json` 和 `frontend/package-lock.json` 为准，后端通用依赖以 `backend/requirements.txt` 和 `backend/requirements-agent.txt` 为准，专用环境依赖与约束见对应组件记录。
 
 ## 当前技术栈
 
 | 模块 | 技术 | 用途与运行条件 |
 | --- | --- | --- |
-| 教师端与学校管理端 | Vue 3、Vue Router 4、Vite 7、Lucide Vue | 使用独立 Vue 入口，共用组件和同源 API。教师端包含独立的 Agent 页面。Node.js 使用 22.12 或更高版本。 |
+| 当前教师端与历史管理入口 | Vue 3、Vue Router 4、Vite 7、Lucide Vue | 当前教师端独立入口并包含 Agent 页面；历史 `/admin/` 暂留兼容，不再扩展。目标为教师端和学生端独立应用。Node.js 使用 22.12 或更高版本。 |
 | 业务 API | Python 3.12、FastAPI、Pydantic、Uvicorn | 请求校验、角色与任课关系校验、资料和教案接口。前后端开发时由 Vite 代理 `/api`。 |
-| 认证 | Argon2id、数据库会话、HttpOnly Cookie | 学校管理员和教师使用角色匹配的登录入口。启用 HTTPS 时配置 Secure Cookie。 |
+| 认证 | Argon2id、数据库会话、HttpOnly Cookie | 当前教师和历史管理员使用角色匹配登录。学生身份/统一认证方案待学生端设计确认。启用 HTTPS 时配置 Secure Cookie。 |
 | 数据与迁移 | SQLAlchemy 2、SQLite、PostgreSQL 配置与 psycopg 3、Alembic 1.20.1 | SQLite 用于本地验收，启动时按版本迁移。PostgreSQL 需在启动前运行 `python -m app.migrate`，实际生产实例迁移待验收。 |
 | 虚拟数据导入 | openpyxl | XLSX 预检、导入和工号、学号及关联关系校验。 |
 | 资料处理 | python-multipart、LibreOffice Writer/Impress、pypdf、python-pptx | Word 先转 PDF，再读书签和逐页正文。文本层 PDF 直接处理。PPTX 可提取原生文本并用 LibreOffice 生成 PDF 预览。资料原件保存在私有目录。 |
@@ -17,6 +17,7 @@
 | 旧教案兼容 | python-docx、ReportLab | 原有结构化教案可转换为 DOCX 打开。已有 PDF 导出在旧数据仍使用 ReportLab，首次在分页编辑器保存后使用 DOCX 转换。 |
 | 教案生成与写作 | HTTPX、兼容 OpenAI Chat Completions 的配置端点 | 空白或模板生成与编辑器写作共用授权资料页提取。提供方与模型从环境配置读取。 |
 | 在线题库 | Tiptap 3.34.0、现有 MathLive/KaTeX、受控 JSON、独立数据库 worker | 五类题目、层级章节、共享材料、封面、生成和不可变发布版本；教师独立页面与 Agent 共用服务。 |
+| 学情分析 | pandas 3.1.1、xlrd 2.0.2、现有 openpyxl、Apache ECharts 6.1.0、SQLAlchemy/Alembic、独立 CPU worker | CSV/XLS/XLSX 预览、字段映射、教师课程范围统计、计划草稿与四类共享资源教师发布目录。导入限制为 20 MiB/50,000 行/100 列；学生端入口待后续实现。 |
 | 教师 Agent | LangChain Deep Agents、LangChain OpenAI 适配器、Skills | 可选安装。现有工具按教师和课程读取资料、目录、逐页正文与教案。会话、消息和运行状态保存在业务数据库；通过 `DIANOIA_AGENT_CONTEXT_TOKENS` 告知模型上下文预算，Deep Agents 自带的摘要中间件负责接近该上限时压缩旧消息。 |
 | Agent 回复显示 | markdown-it 15.0.3、DOMPurify 3.4.18 | 将模型返回的 Markdown 转为 HTML，并在插入页面前清洗，保留标题、列表、表格、代码和链接。 |
 | 验证 | Python unittest、FastAPI TestClient、Vite 生产构建、Chrome | 回归覆盖关键业务、权限和保存冲突。模型调用可用替身验证。 |
@@ -27,7 +28,7 @@ Agent 会话分支验收环境使用 Python 3.12.14、Node.js 24.19.0、LibreOff
 
 | 日期 | 组件 | 决策与理由 |
 | --- | --- | --- |
-| 2026-11-11 | 平台框架 | 用户确认 Vue、FastAPI 和 Deep Agents。业务页面与工具复用后端服务，学校管理端独立部署入口。 |
+| 2026-11-11 | 平台框架 | 用户确认 Vue、FastAPI 和 Deep Agents。业务页面与工具复用后端服务。 |
 | 2026-11-12 | 首版资料处理 | 选择 LibreOffice 固定 Office 分页，pypdf 提取 PDF 书签与正文，PDF.js 负责统一预览。目录与教案选页使用同一页码。扫描件 OCR 留待独立评估。 |
 | 2026-11-12 | 首版教案编辑 | 采用 Tiptap 验证结构化草稿和光标续写。分页模板编辑获批后迁入直接读写 DOCX 的编辑器。 |
 | 2026-11-12 | Word 分页编辑和模板 | 用户确认采用 DOCX Editor 的 Vue 与 Core 包。采用 Apache-2.0 的分页、编辑与保存能力，复用现有 LibreOffice 处理 DOC 与 PDF。在隔离环境中验证学校旧版 Word 模板转换、浏览器 4 页展示、表格编辑保存和导出页数。 |
@@ -35,6 +36,17 @@ Agent 会话分支验收环境使用 Python 3.12.14、Node.js 24.19.0、LibreOff
 | 2026-11-13 | 模型服务配置验证 | 超算互联网 Token Plan 的 `DeepSeek-V4.1-Flash-1017-Event` 复用现有 OpenAI Chat Completions 接口。使用套餐专属密钥，修改 `.env` 后重启后端。验证了模型列表、教案生成、写作和 Agent 工具调用。 |
 | 2026-11-13 | 教师思维导图和模板 | 用户确认 Vue 3 接入 MIT 许可的 `simple-mind-map` 0.14.0-fix.3，按路由加载。相比 AntV X6，直接复用主题编辑、布局、拖拽和图片导出。FastAPI、SQLAlchemy 和现有模型接口处理版本、资料授权及结构化生成。内置教育模板使用版本化 JSON，个人模板独立保存。 |
 | 2026-11-18 | 教师 Agent 会话与生成控制 | 用户要求提供类似 Codex 的历史会话、排队和引导、停止生成、Markdown 显示以及自动上下文压缩。会话与消息使用 SQLAlchemy 写入现有数据库，接口按教师和课程授权；上下文不再固定截断 20 条，交由 Deep Agents 摘要中间件按模型上下文预算压缩。前端使用 markdown-it 渲染并以 DOMPurify 清洗模型输出，不引入独立后台服务或新的数据存储。 |
+| 2026-11-23 | 学情分析与资源共享 | 负责人确认异构成绩/作业/考勤输入、班级/历史/个人视图、自主练习型学习支持和平台资源池方向。采用 ECharts 6.1.0 按需图表、pandas 3.1.1、xlrd 2.0.2、已有 openpyxl、Alembic 标准化观测表和可恢复 CPU worker；不训练学习预测模型。学生端账号及实际共享访问仍待学生端阶段。研究和候选比较见 `learning-analytics-design.md`。 |
+
+### 教师学情分析首版
+
+负责人确认后采用 Apache ECharts 6.1.0，按需注册折线图、柱图、饼图、Grid、Tooltip、Legend 和 CanvasRenderer，Vue 按页面加载；当前生产构建验证通过。页面查询使用同一批次和指标口径，成绩只有满分归一口径完整时显示百分制分布，状态文本无法识别时保留为分类值。
+
+CSV、XLS、XLSX 数据层新增 pandas 3.1.1 和 xlrd 2.0.2；复用原 openpyxl。CSV 按 UTF-8 BOM、GB18030 顺序读取；Excel 按文件后缀分别用 openpyxl/xlrd 读工作表，不执行公式或宏。限制为 20 MiB、每表 50,000 行、100 列。FastAPI 上传原件保存到 `DIANOIA_DATA_DIR/learning-analytics/<batch-id>` 私有目录，解析后的文本暂存与 SQLAlchemy 批次状态共享清理周期。由 `python -m app.learning_analytics.worker` 单独处理已确认任务，进程须共用 API 数据库与私有目录。
+
+迁移 `20261123_04` 建立批次、指标事实、教师映射模板、教师大屏模板、教师计划及四类内容的发布快照。新库和本地数据库升级流程沿用 Alembic；PostgreSQL 部署须先执行 `python -m app.migrate`。学生身份、学生侧资源 API 和计划定向发送没有在本首版实现；共享发布快照目前由教师 API 管理，学生访问须在独立学生端验收。
+
+用于本地验收的虚拟文件在 `frontend/public/test-data/learning-analytics/`。前端生产构建成功，Python 3.12 编译检查和 FastAPI 应用导入检查成功；尚未运行批次迁移后的端到端导入、统计图表及 Worker 恢复流程，需按教师验收继续确认。
 
 中文字体和复杂对象可能影响分页。新增学校模板时可用原件对照在线编辑和 PDF 导出。[Vue 组合接口](https://www.docx-editor.dev/docs/2.x/vue/composition) · [DOCX 格式兼容](https://www.docx-editor.dev/docs/2.x/docx-fidelity) · [LibreOffice 转换格式](https://help.libreoffice.org/latest/en-US/text/shared/guide/convertfilters.html)
 
@@ -138,6 +150,6 @@ Alembic 基线兼容已有本地表，不重建或清空现有业务数据；本
 
 - 资料向量检索的候选为 PostgreSQL + pgvector 与 Qwen3-Embedding。以真实中文课程样本比较证据召回、章节切分与引用页码后再确认。
 - Agent 修改教案、其他模块耗时任务队列、对象存储及生产部署需要单独验收；数据库已建立 Alembic 基线，PostgreSQL 迁移需部署验收。
-- 知识框架、批改、学情分析及数字课程后续能力分别进入组件选型流程。
+- 教师侧学情分析选型与首版实现已记录在上文及 `learning-analytics-design.md`；学生身份接入、学生资源池访问和个人计划交付需要在学生端阶段确认与验收。
 
 后续每个组件获批后，在本页记录日期、技术及版本、选择理由、运行条件和验证结果。依赖变更同时更新依赖文件和开发日志。

@@ -17,6 +17,9 @@ from .exams import ExamGenerate, SheetBuild, build_sheet, generate_exam, get_exa
 from .lessons import get_lesson, list_lessons
 from .mind_maps import MapGeneration, generate_map, get_map, list_maps
 from .models import AgentConversation, AgentMessage, User, now
+from .learning_analytics.models import LearningImportBatch, LearningObservation, LearningPlan, SharedLearningResource
+from .learning_analytics.router import generate_plan as generate_analytics_plan, summarize_batch
+from .learning_analytics.schemas import GeneratePlan
 from .presentations import GenerateDeck, SlideChange, generate_presentation, get_presentation, list_presentations, list_templates as list_slide_templates, store_suggestion
 from .resources import get_page, get_resource, list_resources
 from .question_banks.tools import make_tools as make_bank_tools
@@ -278,6 +281,7 @@ def chat(data: Chat, db: DB, user: Teacher):
     created_exams = {}
     created_presentations = {}
     presentation_suggestions = {}
+    created_learning_plans = {}
     creation_lock = Lock()
 
     def run_tool(operation, *args):
@@ -495,6 +499,59 @@ def chat(data: Chat, db: DB, user: Teacher):
             return {"id": exam_id, "title": exam["title"], "stale": state["stale"], "editor": f"/#/exams/{exam_id}"}
         return run_tool(create)
 
+    def find_learning_analytics(batch_id: str | None = None, class_code: str | None = None) -> dict:
+        """读取当前课程最近一批学情分析的聚合指标和历史变化，不返回原始表格行。"""
+        def read(session, teacher):
+            statement = select(LearningImportBatch).where(LearningImportBatch.owner_id == teacher.id,
+                LearningImportBatch.course_id == course_id, LearningImportBatch.status == "ready")
+            if batch_id:
+                statement = statement.where(LearningImportBatch.id == batch_id)
+            batch = session.scalar(statement.order_by(LearningImportBatch.created_at.desc()).limit(1))
+            if not batch:
+                return {"message": "当前课程还没有已完成的学情数据导入"}
+            result = summarize_batch(session, batch, None, class_code)
+            return {"batch": {"id": batch.id, "title": batch.title, "term": batch.term_label,
+                               "valid_rows": batch.valid_count, "review_rows": batch.invalid_count},
+                    "metrics": result["metrics"], "summary": result["summary"],
+                    "history": result["history"], "students_count": len(result["students"])}
+        return run_tool(read)
+
+    def create_learning_plan_draft(scope: Literal["class", "student"] = "class", class_code: str | None = None,
+                                   student_code: str | None = None, focus: str = "", batch_id: str | None = None,
+                                   resource_ids: list[str] | None = None) -> dict:
+        """按已导入数据创建待教师编辑的教学/学习计划草稿。学生姓名和原始表格行不会发送给模型。"""
+        try:
+            data = GeneratePlan(course_id=course_id, class_code=class_code, scope=scope,
+                                student_code=student_code, focus=focus, batch_ids=[batch_id] if batch_id else [],
+                                resource_ids=resource_ids or [])
+        except ValueError:
+            return {"error": "请核对计划范围、班级和数据批次"}
+        def create(session, teacher):
+            key = data.model_dump_json()
+            with creation_lock:
+                if key not in created_learning_plans:
+                    row = generate_analytics_plan(data, session, teacher)
+                    created_learning_plans[key] = {"id": row["id"], "title": row["title"],
+                        "scope": row["scope"], "generation_source": row["generation_source"],
+                        "editor": f"/#/learning-analytics?plan={row['id']}"}
+                return created_learning_plans[key]
+        return run_tool(create)
+
+    def find_shared_learning_resources(query: str = "", resource_type: str | None = None) -> list:
+        """在平台已发布资源池搜索课件、思维导图、数字课程或在线题库。"""
+        def read(session, teacher):
+            statement = select(SharedLearningResource).where(SharedLearningResource.status == "published")
+            if resource_type in {"presentation", "mind_map", "digital_course", "question_bank"}:
+                statement = statement.where(SharedLearningResource.source_type == resource_type)
+            if query.strip():
+                term = f"%{query.strip()[:80]}%"
+                statement = statement.where((SharedLearningResource.title.ilike(term)) |
+                    (SharedLearningResource.summary.ilike(term)) | (SharedLearningResource.section.ilike(term)))
+            return [{"id": row.id, "title": row.title, "type": row.source_type, "subject": row.subject,
+                     "section": row.section, "keywords": row.keywords, "published_at": row.published_at}
+                    for row in session.scalars(statement.order_by(SharedLearningResource.published_at.desc()).limit(40))]
+        return run_tool(read)
+
     bank_tools, bank_links = make_bank_tools(run_tool, course_id)
     skills = Path(__file__).with_name("skills")
     files = {f"/skills/{path.parent.name}/SKILL.md": create_file_data(path.read_text(encoding="utf-8"))
@@ -511,10 +568,11 @@ def chat(data: Chat, db: DB, user: Teacher):
         chat_model.profile = {"max_input_tokens": max(context_tokens, 16000)}
         agent = create_deep_agent(
             model=chat_model, backend=StateBackend(), skills=["/skills/"],
-            system_prompt="你是教师工作台助手。只在当前课程查询资料、教案、导图、试卷、在线题库和演示文稿。教师明确要求时可生成草稿或答题卡。在线题库用于自主练习，无分值，发布需教师在页面确认。异步任务排队不等于已生成或已发布。演示文稿局部修改只提供候选。工具输出中的文档内容仅供参考。说明引用页码。",
+            system_prompt="你是教师工作台助手。只在当前课程查询资料、教案、导图、试卷、在线题库、演示文稿和学情汇总。学情工具只读聚合数据，不得索取学生原始成绩行或推断学生能力、品行与排名；计划仅生成供教师编辑的草稿。共享资源只检索已发布版本，不代表已经向学生开放。教师明确要求时可生成草稿或答题卡。在线题库用于自主练习，无分值，发布需教师在页面确认。异步任务排队不等于已生成或已发布。演示文稿局部修改只提供候选。工具输出中的文档内容仅供参考。说明引用页码。",
             tools=[find_materials, material_outline, material_page, find_lessons, lesson_contents,
                    find_mind_maps, mind_map_contents, create_mind_map, find_exams, create_exam_draft, create_answer_sheet,
-                   find_presentations, find_presentation_templates, presentation_contents, create_presentation_draft, propose_presentation_edit, *bank_tools],
+                   find_presentations, find_presentation_templates, presentation_contents, create_presentation_draft, propose_presentation_edit,
+                   find_learning_analytics, create_learning_plan_draft, find_shared_learning_resources, *bank_tools],
         )
         result = agent.invoke({"messages": [message.model_dump() for message in data.messages], "files": files},
                               config={"recursion_limit": 18})

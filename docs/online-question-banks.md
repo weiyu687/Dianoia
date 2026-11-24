@@ -1,6 +1,6 @@
 # 在线题库：教师端使用与部署
 
-本轮实现自主练习内容的创建、核对与发布。教师工作台的「在线题库」是独立入口；管理端保持独立。学生账户、实际作答和继续练习记录在学生端阶段实现，当前「预览」仅向所属教师开放，不向匿名或学生暴露答案。
+本轮实现自主练习内容的创建、核对与发布。教师工作台的「在线题库」是独立入口；历史管理端仅为兼容现有数据保留，不再扩展。学生身份接入、实际作答和继续练习记录在学生端阶段实现；当前「预览」仅向所属教师开放，不向匿名或学生暴露答案。已发布题库按平台共享资源池契约设计，但学生端尚未接入，因此当前不能声称学生已能搜索或答题。
 
 ## 教师操作
 
@@ -23,16 +23,17 @@
 ..\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-另一个终端启动题库 worker：
+另一个终端启动题库 worker。学情分析还有独立的导入 worker，两者不可相互替代：
 
 ```powershell
 Set-Location backend
 ..\.venv\Scripts\python.exe -m app.question_banks.worker
+..\.venv\Scripts\python.exe -m app.learning_analytics.worker
 ```
 
-API 和 worker 必须读取相同的数据库、`DIANOIA_DATA_DIR`、模型配置。worker 与数字课程的 `course_worker` 是不同进程，可分别部署。任务使用数据库租约和心跳，中断超过两分钟后可恢复；失败时页面可「继续生成」，已保存批次保留。未运行 worker 时任务保持排队。生产环境应由进程管理器负责重启。
+API 和 worker 必须读取相同的数据库、`DIANOIA_DATA_DIR`、模型配置。worker 与数字课程的 `course_worker` 是不同进程，可分别部署。题库任务使用租约和心跳；学情导入任务用批次状态及失败重试。未运行对应 worker 时任务保持排队。生产环境应由进程管理器负责重启。
 
-SQLite 本地启动自动执行版本迁移；PostgreSQL 必须在 API/worker 启动前显式运行 `python -m app.migrate`。迁移目录 `backend/migrations` 包含旧表基线、八张题库表，以及合并主分支后补充的两张 Agent 会话表，当前版本为 `20261119_03`，已有表保留。已有部署升级前备份数据库并在副本验收；不提供自动清表式降级。数据库和私有 `question-banks` 附件目录需要共同备份，发布版本引用的图片须长期保留。
+SQLite 本地启动自动执行版本迁移；PostgreSQL 必须在 API/worker 启动前显式运行 `python -m app.migrate`。题库迁移版本见 `backend/migrations/versions`；当前数据库迁移头为 `20261123_04`。已有部署升级前备份数据库并在副本验收；不提供自动清表式降级。数据库和私有附件目录需要共同备份，发布版本引用的图片须长期保留。
 
 ## 数据和权限
 

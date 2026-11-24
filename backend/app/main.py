@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from . import admin, agent, ai, auth, digital_courses, exams, lesson_templates, lessons, mind_maps, presentations, resources
 from .db import engine
+from .learning_analytics.router import router as learning_analytics_router
 from .migrate import initialize_database
 from .question_banks.router import router as question_bank_router
 from .models import AgentMessage
@@ -50,3 +51,4 @@ for feature in (auth, admin, resources, lessons, lesson_templates, ai, mind_maps
     app.include_router(feature.router)
 
 app.include_router(question_bank_router)
+app.include_router(learning_analytics_router)

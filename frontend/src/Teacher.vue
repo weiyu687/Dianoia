@@ -1,6 +1,6 @@
 <script setup>
 import { onMounted, ref } from 'vue'
-import { BookOpen, BookOpenCheck, ClipboardList, House, LibraryBig, LogOut, MessageCircle, PanelLeft, Presentation, Video, Workflow } from 'lucide-vue-next'
+import { Activity, BookOpen, BookOpenCheck, ClipboardList, House, LibraryBig, LogOut, MessageCircle, PanelLeft, Presentation, Video, Workflow } from 'lucide-vue-next'
 import { useRoute, useRouter } from 'vue-router'
 import { changeCourse, courseId, logout, restore, user } from './session'
 import Brand from './components/Brand.vue'
@@ -21,6 +21,7 @@ const items = [
   { to: '/digital-courses', label: '数字课程', icon: Video, routes: ['digitalCourses', 'digitalCourse'] },
   { to: '/exams', label: '试卷', icon: ClipboardList, routes: ['exams', 'exam', 'examTemplates'] },
   { to: '/question-banks', label: '在线题库', icon: BookOpenCheck, routes: ['questionBanks', 'questionBank', 'questionBankPreview'] },
+  { to: '/learning-analytics', label: '学情分析', icon: Activity, routes: ['learningAnalytics'] },
   { to: '/agent', label: '教师 Agent', icon: MessageCircle, routes: ['agent'] },
 ]
 

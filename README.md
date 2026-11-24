@@ -1,6 +1,6 @@
 # Dianoia 智能教育平台
 
-教师端和学校管理端由两个独立的 Vue 应用入口提供服务，共用 FastAPI 和数据库。开发环境支持 Python 3.12 与 Node.js 22.12 及以上版本。
+教师端和历史学校数据维护入口由两个独立的 Vue 应用入口提供服务，共用 FastAPI 和数据库。学校管理入口仅为兼容现有虚拟数据保留，不再扩展新管理功能。开发环境支持 Python 3.12 与 Node.js 22.12 及以上版本。
 
 依赖、运行条件和变更依据见[技术栈与选型记录](docs/technology-stack.md)。
 
@@ -38,6 +38,17 @@ npm run dev
 - 从「演示文稿」的「音视频」上传 MP3 或 H.264/AAC MP4，同一教师可在本课程复用单个文件。选中对象后打开「动画」可设置效果、触发方式、顺序和时长。放映时单击画面推进动画，当前页动画完成后再翻页。PPTX 内嵌音视频，PDF 显示静态媒体标签。
 - 从「数字课程」上传 PPT/PPTX、编辑逐页口播稿、选择形象和音色并导出 MP4。个人声音档案通过 CosyVoice 2 使用参考录音及原文合成新讲稿，支持逐页试听；视频渲染使用 SadTalker。AI 讲稿和视频生产需要运行后台 worker，模型和媒体依赖见[数字课程部署说明](docs/digital-courses.md)。
 - 从「在线题库」管理自主练习题、封面、章节与子章节、答案解析，可按资料批量生成、单题修改或导入 Word 候选，核对后发布固定版本。后台生成需要独立运行 `python -m app.question_banks.worker`；升级前执行 `python -m app.migrate`。使用及部署见[在线题库说明](docs/online-question-banks.md)。学生端实际作答在后续阶段实现。
+- 从「学情分析」上传成绩、作业、考勤等 CSV/XLS/XLSX，选择工作表、映射字段并预览异常行；可查看当前批次、历史趋势和学生记录，生成可编辑的教学/学习计划草稿，并发布课件、题库、导图和数字课程快照到共享资源目录。导入任务需独立运行 `python -m app.learning_analytics.worker`。
+- 学情分析可用合成样例：[多工作表 XLSX](frontend/public/test-data/learning-analytics/课程学情综合示例.xlsx)、[旧版 XLS 考勤表](frontend/public/test-data/learning-analytics/考勤示例-XLS.xls)、[UTF-8 BOM 成绩 CSV](frontend/public/test-data/learning-analytics/成绩示例-UTF8.csv)、[GB18030 作业 CSV](frontend/public/test-data/learning-analytics/作业示例-GB18030.csv)。样例仅含虚构学生信息。
+
+学情分析首次使用前，在后端启动一次数据库迁移；本地 SQLite 也会在 API 启动时应用迁移。CSV/XLS/XLSX 确认导入后，在单独的终端从 `backend` 目录启动任务 worker：
+
+```powershell
+Set-Location backend
+..\.venv\Scripts\python.exe -m app.learning_analytics.worker
+```
+
+worker 必须与 API 使用相同的数据库及 `DIANOIA_DATA_DIR`。批次完成后，教师端会自动刷新统计视图。停止 worker 可用 `Ctrl+C`。
 
 ## 配置
 

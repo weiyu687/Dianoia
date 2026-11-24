@@ -2,6 +2,7 @@ from alembic import context
 from app.db import Base, engine
 from app import models, course_models
 from app.question_banks import models as bank_models
+from app.learning_analytics import models as analytics_models
 
 
 def run(connection):
