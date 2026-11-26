@@ -56,7 +56,7 @@ async function signOut() {
 <template>
   <div v-if="!ready" class="full-state" role="status">正在加载工作台</div>
   <Login v-else-if="!user" role="teacher" />
-  <div v-else class="teacher-shell" :class="{ 'nav-open': navigationOpen }">
+  <div v-else class="teacher-shell" :class="{ 'nav-open': navigationOpen, 'teacher-chat': route.name === 'agent' }">
     <aside class="navigation">
       <Brand />
       <nav aria-label="教师功能">

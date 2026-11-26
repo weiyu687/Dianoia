@@ -249,50 +249,13 @@ dialog::backdrop { background: #080713b0; backdrop-filter: blur(3px); }
 .writing-suggestion .writing-controls { justify-content: flex-end; }
 .template-actions { justify-content: flex-end; }
 
-.agent-page { min-height: calc(100vh - 65px); }
-.agent-layout { display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 20px; min-height: calc(100vh - 110px); }
-.agent-history { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 13px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; align-self: start; position: sticky; top: 81px; max-height: calc(100vh - 102px); }
-.agent-history > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.agent-history > header > div { display: flex; align-items: center; gap: 7px; }
-.agent-history-list { display: grid; gap: 5px; overflow: auto; min-height: 0; }
-.agent-history-list article { position: relative; border-radius: 10px; }
-.agent-history-list article.active { background: var(--raised); }
-.agent-history-open { display: grid; gap: 4px; width: 100%; padding: 9px 28px 9px 9px; text-align: left; border: 0; border-radius: 10px; background: transparent; color: inherit; }
-.agent-history-open:hover { background: var(--raised); }
-.agent-history-open strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
-.agent-history-open small { color: var(--muted); font-size: 10px; }
-.agent-history-delete { position: absolute; top: 7px; right: 5px; display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); opacity: 0; }
-.agent-history-list article:hover .agent-history-delete, .agent-history-list article:focus-within .agent-history-delete { opacity: 1; }
-.agent-history-delete:hover { color: var(--danger); background: var(--surface); }
-.agent-history-empty { color: var(--muted); font-size: 12px; padding: 14px 4px; }
-.agent-main { display: flex; flex-direction: column; min-width: 0; min-height: calc(100vh - 110px); }
-.agent-heading { min-height: 60px; }
-.agent-heading h1 { font-size: clamp(25px, 3vw, 34px); margin: 0 0 4px; }
-.agent-heading p { margin: 0; color: var(--muted); }
-.agent-alert { margin-bottom: 8px; }
-.agent-notice { margin: 0 0 8px; color: var(--muted); font-size: 12px; }
-.agent-conversation-wrap { flex: 1; min-height: 260px; overflow: auto; padding: 4px 5px 18px; }
-.agent-empty { display: grid; justify-items: center; align-content: center; min-height: 38vh; gap: 12px; text-align: center; }
-.agent-icon { display: grid; place-items: center; width: 56px; height: 56px; border-radius: 18px; background: var(--raised); color: var(--accent); }
-.agent-suggestions { display: grid; gap: 7px; width: min(100%, 580px); }
-.agent-suggestions button { padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--muted); text-align: left; }
-.agent-suggestions button:hover { color: var(--text); border-color: var(--accent); }
-.agent-conversation { display: grid; gap: 22px; padding: 10px 0 20px; }
-.agent-message { overflow-wrap: anywhere; max-width: min(92%, 760px); }
-.agent-message.user { justify-self: end; background: var(--raised); border-radius: 15px 15px 5px 15px; padding: 10px 14px; white-space: pre-wrap; }
-.agent-message.user p { margin: 0; }
-.agent-message.assistant { justify-self: stretch; }
-.agent-message-label { display: flex; align-items: baseline; gap: 7px; margin-bottom: 7px; color: var(--accent); font-weight: 650; }
-.agent-message-label small { color: var(--muted); font-size: 10px; font-weight: 400; }
-.agent-thinking { display: flex; align-items: center; gap: 5px; min-height: 28px; color: var(--muted); }
-.agent-thinking span { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: agent-pulse 1.2s infinite ease-in-out; }
-.agent-thinking span:nth-child(2) { animation-delay: .15s; }
-.agent-thinking span:nth-child(3) { animation-delay: .3s; }
-.agent-thinking em { margin-left: 4px; font-style: normal; font-size: 12px; }
-@keyframes agent-pulse { 0%, 70%, 100% { opacity: .25; transform: translateY(0); } 35% { opacity: 1; transform: translateY(-3px); } }
-.agent-message-actions { display: flex; margin-top: 8px; }
-.agent-message-actions button { border: 0; background: transparent; color: var(--muted); font-size: 11px; padding: 3px 0; }
-.agent-message-actions button:hover { color: var(--text); }
+.teacher-shell.teacher-chat { height: 100dvh; min-height: 0; overflow: hidden; }
+.teacher-chat .navigation { height: 100dvh; overflow-y: auto; }
+.teacher-chat .main-shell, .teacher-chat main { display: flex; flex-direction: column; min-height: 0; }
+.teacher-chat .main-shell { height: 100%; }
+.teacher-chat .topbar { flex: none; }
+.teacher-chat main { flex: 1; }
+
 .markdown-content { line-height: 1.72; overflow-wrap: anywhere; }
 .markdown-content > :first-child { margin-top: 0; }
 .markdown-content > :last-child { margin-bottom: 0; }
@@ -312,21 +275,6 @@ dialog::backdrop { background: #080713b0; backdrop-filter: blur(3px); }
 .markdown-content a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
 .markdown-content img { max-width: 100%; border-radius: 8px; }
 .markdown-content hr { border: 0; border-top: 1px solid var(--line); margin: 1em 0; }
-.agent-composer-shell { position: sticky; bottom: 0; display: grid; gap: 7px; padding-top: 8px; background: linear-gradient(transparent, var(--bg) 12px); }
-.agent-followup-mode { display: flex; align-items: center; gap: 5px; padding: 4px 7px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); width: fit-content; }
-.agent-followup-mode button { border: 0; border-radius: 7px; padding: 4px 9px; background: transparent; color: var(--muted); font-size: 11px; }
-.agent-followup-mode button.active { background: var(--raised); color: var(--text); }
-.agent-followup-mode span { color: var(--muted); font-size: 11px; padding-inline: 4px; }
-.agent-queue { display: grid; gap: 4px; }
-.agent-queue > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 6px 9px; border: 1px dashed var(--line); border-radius: 9px; color: var(--muted); font-size: 12px; }
-.agent-queue span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.agent-queue button { border: 0; background: transparent; color: var(--muted); }
-.composer { padding: 11px; background: var(--surface); border: 1px solid var(--line); border-radius: 17px; box-shadow: 0 6px 28px var(--shadow); }
-.composer textarea { width: 100%; border: 0; background: transparent; padding: 8px; resize: vertical; }
-.composer .section-heading { padding-left: 7px; }
-.agent-composer-footer { gap: 8px; }
-.agent-composer-footer > .muted { font-size: 11px; }
-
 .login-shell { min-height: 100vh; }
 .login-top { display: flex; align-items: center; justify-content: space-between; padding: 20px clamp(17px, 4vw, 45px); }
 .login-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, .78fr); align-items: center; max-width: 1170px; gap: 45px; margin: 28px auto; padding: 0 26px; }
@@ -353,11 +301,11 @@ dialog::backdrop { background: #080713b0; backdrop-filter: blur(3px); }
   .teacher-shell { grid-template-columns: 161px minmax(0, 1fr); }
   .document-layout { grid-template-columns: 190px minmax(0, 1fr); }
   .login-grid { gap: 18px; }
-  .agent-layout { grid-template-columns: 190px minmax(0, 1fr); gap: 14px; }
 }
 
 @media (max-width: 710px) {
   .teacher-shell { display: block; }
+  .teacher-chat .navigation { height: auto; }
   .navigation { position: fixed; display: none; z-index: 5; inset: 64px auto 0 0; height: auto; width: 195px; box-shadow: 0 15px 35px var(--shadow); }
   .teacher-shell.nav-open .navigation { display: flex; }
   .menu-button { display: inline-flex; }
@@ -369,13 +317,6 @@ dialog::backdrop { background: #080713b0; backdrop-filter: blur(3px); }
   .hero { min-height: 235px; }
   .hero-agent span { display: none; }
   .hero-agent { top: 12px; right: 12px; }
-  .agent-layout { display: block; }
-  .agent-history { position: static; max-height: 180px; margin-bottom: 13px; }
-  .agent-history-list { max-height: 105px; }
-  .agent-main { min-height: auto; }
-  .agent-conversation-wrap { overflow: visible; }
-  .agent-composer-shell { bottom: 8px; }
-  .agent-followup-mode { flex-wrap: wrap; }
   .data-table th, .data-table td { padding: 7px 5px; font-size: 12px; }
   .data-table .file-icon { width: 31px; height: 32px; border-radius: 6px; font-size: 9px; }
   .file-title { gap: 6px; }

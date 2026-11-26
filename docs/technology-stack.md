@@ -38,6 +38,10 @@ Agent 会话分支验收环境使用 Python 3.12.14、Node.js 24.19.0、LibreOff
 | 2026-11-18 | 教师 Agent 会话与生成控制 | 用户要求提供类似 Codex 的历史会话、排队和引导、停止生成、Markdown 显示以及自动上下文压缩。会话与消息使用 SQLAlchemy 写入现有数据库，接口按教师和课程授权；上下文不再固定截断 20 条，交由 Deep Agents 摘要中间件按模型上下文预算压缩。前端使用 markdown-it 渲染并以 DOMPurify 清洗模型输出，不引入独立后台服务或新的数据存储。 |
 | 2026-11-23 | 学情分析与资源共享 | 负责人确认异构成绩/作业/考勤输入、班级/历史/个人视图、自主练习型学习支持和平台资源池方向。采用 ECharts 6.1.0 按需图表、pandas 3.1.1、xlrd 2.0.2、已有 openpyxl、Alembic 标准化观测表和可恢复 CPU worker；不训练学习预测模型。学生端账号及实际共享访问仍待学生端阶段。研究和候选比较见 `learning-analytics-design.md`。 |
 
+### 2026-11-26｜教师 Agent 扩展与对话工作区
+
+沿用已选的 Deep Agents、FastAPI、Vue 3、markdown-it 和 DOMPurify。按业务模块定义有类型的 Python 工具，使用显式注册表传给 `create_deep_agent`，同时注册对应 Skill。工具复用当前教师的课程授权与业务服务。统一的成果卡片写入现有消息 JSON，可追加新业务类型并兼容历史对话。界面采用独立工作区、可收起的会话历史、居中消息列和底部输入框。候选包括在聊天接口内继续集中维护工具，或将工具单独部署为 MCP 服务。当前进程内注册直接复用数据库会话和已有的模型部署。[Deep Agents 自定义工具](https://docs.langchain.com/oss/python/deepagents/customization) · [LangChain 工具输入和返回值](https://docs.langchain.com/oss/python/langchain/tools)
+
 ### 教师学情分析首版
 
 负责人确认后采用 Apache ECharts 6.1.0，按需注册折线图、柱图、饼图、Grid、Tooltip、Legend 和 CanvasRenderer，Vue 按页面加载；当前生产构建验证通过。页面查询使用同一批次和指标口径，成绩只有满分归一口径完整时显示百分制分布，状态文本无法识别时保留为分类值。
@@ -149,7 +153,7 @@ Alembic 基线兼容已有本地表，不重建或清空现有业务数据；本
 ## 待验证和待选型
 
 - 资料向量检索的候选为 PostgreSQL + pgvector 与 Qwen3-Embedding。以真实中文课程样本比较证据召回、章节切分与引用页码后再确认。
-- Agent 修改教案、其他模块耗时任务队列、对象存储及生产部署需要单独验收；数据库已建立 Alembic 基线，PostgreSQL 迁移需部署验收。
+- Agent 修改教案 Word 正文、其他模块耗时任务队列、对象存储及生产部署需要单独验收。数据库已建立 Alembic 基线，PostgreSQL 迁移需部署验收。
 - 教师侧学情分析选型与首版实现已记录在上文及 `learning-analytics-design.md`；学生身份接入、学生资源池访问和个人计划交付需要在学生端阶段确认与验收。
 
 后续每个组件获批后，在本页记录日期、技术及版本、选择理由、运行条件和验证结果。依赖变更同时更新依赖文件和开发日志。

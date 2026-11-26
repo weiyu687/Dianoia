@@ -1,7 +1,11 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ArrowUp, History, MessageCircle, Plus, Square, Trash2 } from 'lucide-vue-next'
-import { api, formatDate } from '../api'
+import {
+  Activity, ArrowDown, ArrowUp, ArrowUpRight, BookOpen, BookOpenCheck, Check, ChevronDown,
+  ClipboardList, Copy, Ellipsis, FileText, Film, LoaderCircle, MessageSquare, PanelLeft,
+  Pencil, Presentation, Search, Sparkles, Square, SquarePen, Trash2, Workflow, X,
+} from 'lucide-vue-next'
+import { api } from '../api'
 import MarkdownContent from '../components/MarkdownContent.vue'
 import { course, courseId } from '../session'
 
@@ -15,13 +19,55 @@ const loadingHistory = ref(true)
 const loadingConversation = ref(false)
 const error = ref('')
 const notice = ref('')
-const scrollTarget = ref(null)
+const scrollArea = ref(null)
+const composerInput = ref(null)
+const historyOpen = ref(!window.matchMedia('(max-width: 900px)').matches)
+const historyQuery = ref('')
+const menuId = ref(null)
+const renameId = ref(null)
+const renameTitle = ref('')
+const atBottom = ref(true)
+const copiedId = ref(null)
+const stopping = ref(false)
 let pollTimer = null
+let requestVersion = 0
+let disposed = false
 let draining = false
-let pendingCourseReload = false
+let guiding = false
+let copyTimer
 
 const messages = computed(() => current.value?.messages ?? [])
-const busy = computed(() => sending.value || messages.value.some((message) => ['thinking', 'stopping'].includes(message.status)))
+const busy = computed(() => sending.value || !!current.value?.busy ||
+  messages.value.some((message) => ['thinking', 'stopping'].includes(message.status)))
+const filteredHistory = computed(() => {
+  const query = historyQuery.value.trim().toLocaleLowerCase()
+  return conversations.value.filter((row) => row.title.toLocaleLowerCase().includes(query))
+})
+const artifactIcons = {
+  lesson: BookOpen, mind_map: Workflow, exam: ClipboardList, presentation: Presentation,
+  question_bank: BookOpenCheck, learning_plan: Activity, digital_course: Film,
+}
+const legacyGroups = {
+  created_lessons: ['lesson', '教案草稿', '/lessons/'],
+  created_mind_maps: ['mind_map', '思维导图', '/mind-maps/'],
+  created_exams: ['exam', '试卷草稿', '/exams/'],
+  created_presentations: ['presentation', '演示文稿', '/presentations/'],
+  question_banks: ['question_bank', '在线题库', '/question-banks/'],
+}
+
+function messageArtifacts(result) {
+  if (!result) return []
+  if (Array.isArray(result.artifacts)) {
+    return result.artifacts.filter(({ route }) => typeof route === 'string' && /^\/[a-z]/.test(route))
+  }
+  const cards = Object.entries(legacyGroups).flatMap(([key, [kind, label, base]]) =>
+    (result[key] || []).map((row) => ({ ...row, kind, label, route: base + encodeURIComponent(row.id) })))
+  for (const row of result.presentation_suggestions || []) {
+    cards.push({ ...row, kind: 'presentation', label: `第 ${row.page} 页修改候选`,
+      route: { name: 'presentation', params: { id: row.presentation_id }, query: { page: row.page, candidate: row.id } } })
+  }
+  return cards
+}
 
 function summary(row) {
   return {
@@ -40,57 +86,77 @@ function remember(row) {
     .sort((left, right) => String(right.updated_at).localeCompare(String(left.updated_at)))
 }
 
-async function loadHistory(openLatest = true) {
+async function loadHistory() {
   loadingHistory.value = true
   error.value = ''
   try {
-    conversations.value = await api(`/agent/conversations?course_id=${courseId.value}`)
-    if (!current.value && openLatest && conversations.value.length) {
+    const rows = await api(`/agent/conversations?course_id=${courseId.value}`)
+    if (disposed) return
+    conversations.value = rows
+    if (!current.value && conversations.value.length) {
       await openConversation(conversations.value[0].id)
     }
   } catch (failure) {
     error.value = failure.message
   } finally {
     loadingHistory.value = false
+    if (current.value) await scrollToLatest()
   }
 }
 
 async function openConversation(id) {
   if (busy.value) return
+  const version = ++requestVersion
   loadingConversation.value = true
   error.value = ''
+  notice.value = ''
+  menuId.value = null
   try {
-    current.value = await api(`/agent/conversations/${id}`)
+    const row = await api(`/agent/conversations/${id}`)
+    if (disposed || version !== requestVersion) return
+    current.value = row
+    if (window.matchMedia('(max-width: 900px)').matches) historyOpen.value = false
     remember(current.value)
-    await scrollToLatest()
     schedulePoll()
   } catch (failure) {
-    error.value = failure.message
+    if (version === requestVersion) error.value = failure.message
   } finally {
-    loadingConversation.value = false
+    if (version === requestVersion) {
+      loadingConversation.value = false
+      await scrollToLatest()
+    }
   }
 }
 
 function newConversation() {
   if (busy.value) return
+  requestVersion += 1
   current.value = null
+  loadingConversation.value = false
   input.value = ''
   queue.value = []
   error.value = ''
   notice.value = ''
   clearTimeout(pollTimer)
+  menuId.value = null
+  if (window.matchMedia('(max-width: 900px)').matches) historyOpen.value = false
+  nextTick(() => composerInput.value?.focus())
 }
 
 async function refreshCurrent(silent = false) {
   if (!current.value?.id) return
+  const id = current.value.id
+  const version = requestVersion
   try {
-    const row = await api(`/agent/conversations/${current.value.id}`)
+    const row = await api(`/agent/conversations/${id}`)
+    if (disposed || version !== requestVersion || current.value?.id !== id) return
     current.value = row
     remember(row)
     if (!silent && !busy.value) notice.value = ''
     schedulePoll()
-    if (!busy.value) await scrollToLatest()
+    if (atBottom.value) await scrollToLatest()
   } catch (failure) {
+    if (disposed || version !== requestVersion) return
     if (!silent) error.value = failure.message
     schedulePoll()
   }
@@ -98,13 +164,20 @@ async function refreshCurrent(silent = false) {
 
 function schedulePoll() {
   clearTimeout(pollTimer)
-  if (!busy.value) return
+  if (disposed || !busy.value || sending.value || stopping.value) return
   pollTimer = setTimeout(() => refreshCurrent(true), 900)
 }
 
-async function scrollToLatest() {
+async function scrollToLatest(behavior = 'instant') {
   await nextTick()
-  scrollTarget.value?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  const area = scrollArea.value
+  if (area) area.scrollTo({ top: area.scrollHeight, behavior })
+  atBottom.value = true
+}
+
+function trackScroll() {
+  const area = scrollArea.value
+  atBottom.value = !area || area.scrollHeight - area.clientHeight - area.scrollTop < 90
 }
 
 async function ensureConversation() {
@@ -119,11 +192,11 @@ async function ensureConversation() {
 }
 
 async function sendNow(text) {
-  if (!text.trim() || sending.value) return
+  if (disposed || !text.trim() || sending.value) return
+  requestVersion += 1
   sending.value = true
   error.value = ''
   notice.value = ''
-  input.value = ''
   try {
     const id = await ensureConversation()
     const stamp = Date.now()
@@ -143,10 +216,12 @@ async function sendNow(text) {
     })
     current.value = row
     remember(row)
-    schedulePoll()
+    return true
   } catch (failure) {
     error.value = failure.message
+    if (!input.value) input.value = text
     await refreshCurrent(true)
+    return false
   } finally {
     sending.value = false
     schedulePoll()
@@ -155,10 +230,10 @@ async function sendNow(text) {
 
 async function submit() {
   const text = input.value.trim()
-  if (!text) return
+  if (!text || stopping.value || loadingConversation.value || loadingHistory.value) return
   input.value = ''
   if (busy.value) {
-    if (mode.value === 'guide') {
+    if (!sending.value && mode.value === 'guide') {
       await guide(text)
     } else {
       queue.value.push({ id: `${Date.now()}-${queue.value.length}`, content: text })
@@ -170,30 +245,35 @@ async function submit() {
 }
 
 async function guide(text) {
+  guiding = true
   notice.value = '正在停止当前回复并处理新的引导…'
   try {
     await cancelCurrent(false, true)
-    await sendNow(text)
-    notice.value = '已按引导开始新的回复。'
+    if (await sendNow(text)) notice.value = '已按引导开始新的回复。'
   } catch (failure) {
     error.value = failure.message
+    if (!input.value) input.value = text
+  } finally {
+    guiding = false
   }
 }
 
 async function cancelCurrent(clearQueue = true, rethrow = false) {
-  if (!current.value?.id) {
-    sending.value = false
-    return
-  }
+  if (!current.value?.id || sending.value || stopping.value) return
+  requestVersion += 1
+  stopping.value = true
+  clearTimeout(pollTimer)
   try {
     current.value = await api(`/agent/conversations/${current.value.id}/cancel`, { method: 'POST' })
-    remember(current.value)
     if (clearQueue) queue.value = []
+    remember(current.value)
     notice.value = '已停止当前回复。'
-    schedulePoll()
   } catch (failure) {
     error.value = failure.message
     if (rethrow) throw failure
+  } finally {
+    stopping.value = false
+    schedulePoll()
   }
 }
 
@@ -204,9 +284,32 @@ function removeQueued(id) {
 async function removeConversation(row) {
   if (busy.value || !window.confirm(`删除对话「${row.title}」？此操作不可恢复。`)) return
   try {
+    menuId.value = null
     await api(`/agent/conversations/${row.id}`, { method: 'DELETE' })
     conversations.value = conversations.value.filter((item) => item.id !== row.id)
     if (current.value?.id === row.id) newConversation()
+  } catch (failure) {
+    error.value = failure.message
+  }
+}
+
+async function beginRename(row) {
+  menuId.value = null
+  renameId.value = row.id
+  renameTitle.value = row.title
+  await nextTick()
+  document.getElementById('agent-rename-title')?.select()
+}
+
+async function renameConversation() {
+  const id = renameId.value
+  const title = renameTitle.value.trim()
+  if (!id || !title) return
+  try {
+    const row = await api(`/agent/conversations/${id}`, { method: 'PATCH', body: { title } })
+    remember(row)
+    if (current.value?.id === id) current.value = { ...current.value, title: row.title, updated_at: row.updated_at }
+    renameId.value = null
   } catch (failure) {
     error.value = failure.message
   }
@@ -221,8 +324,10 @@ function handleComposerKeydown(event) {
 
 async function copyMessage(message) {
   try {
-    await navigator.clipboard.writeText(message)
-    notice.value = '回复已复制。'
+    await navigator.clipboard.writeText(message.content)
+    copiedId.value = message.id
+    clearTimeout(copyTimer)
+    copyTimer = setTimeout(() => { copiedId.value = null }, 1500)
   } catch {
     error.value = '复制失败，请手动选择文字。'
   }
@@ -234,15 +339,7 @@ watch(busy, async (active) => {
     return
   }
   clearTimeout(pollTimer)
-  if (pendingCourseReload) {
-    pendingCourseReload = false
-    current.value = null
-    queue.value = []
-    input.value = ''
-    await loadHistory()
-    return
-  }
-  if (draining || !queue.value.length || sending.value) return
+  if (disposed || draining || guiding || !queue.value.length || sending.value || stopping.value) return
   draining = true
   try {
     const next = queue.value.shift()
@@ -253,15 +350,12 @@ watch(busy, async (active) => {
   }
 })
 
-watch(courseId, async () => {
-  if (busy.value) {
-    pendingCourseReload = true
-    return
-  }
-  current.value = null
-  queue.value = []
-  input.value = ''
-  await loadHistory()
+watch(input, async () => {
+  await nextTick()
+  const field = composerInput.value
+  if (!field) return
+  field.style.height = 'auto'
+  field.style.height = `${field.scrollHeight}px`
 })
 
 onMounted(async () => {
@@ -269,114 +363,149 @@ onMounted(async () => {
   schedulePoll()
 })
 
-onBeforeUnmount(() => clearTimeout(pollTimer))
+onBeforeUnmount(() => {
+  disposed = true
+  clearTimeout(pollTimer)
+  clearTimeout(copyTimer)
+})
 </script>
 
 <template>
-  <div class="page agent-page">
-    <div class="agent-layout">
-      <aside class="agent-history" aria-label="对话历史">
-        <header>
-          <div><History :size="17" /><strong>历史对话</strong></div>
-          <button class="button primary icon-only" aria-label="新建对话" :disabled="busy" @click="newConversation">
-            <Plus :size="18" />
-          </button>
-        </header>
-        <p v-if="loadingHistory" class="muted" role="status">正在加载对话</p>
-        <p v-else-if="!conversations.length" class="agent-history-empty">还没有历史对话</p>
-        <div v-else class="agent-history-list">
-          <article v-for="row in conversations" :key="row.id" :class="{ active: current?.id === row.id }">
-            <button class="agent-history-open" :disabled="busy" @click="openConversation(row.id)">
-              <strong>{{ row.title }}</strong>
-              <small>{{ formatDate(row.updated_at) }}<span v-if="row.busy"> · 正在回复</span></small>
+  <div class="chat-workspace" @keydown.esc="menuId = null; renameId = null">
+    <button v-if="historyOpen" class="chat-backdrop" type="button" aria-label="关闭对话历史" @click="historyOpen = false"></button>
+    <aside v-if="historyOpen" class="chat-history" aria-label="对话历史">
+      <div class="chat-history-heading">
+        <strong>对话历史</strong>
+        <button class="chat-icon-button" type="button" aria-label="收起对话历史" title="收起对话历史" @click="historyOpen = false">
+          <PanelLeft :size="18" />
+        </button>
+      </div>
+      <button class="chat-new" type="button" :disabled="busy" @click="newConversation">
+        <SquarePen :size="17" /> 新建对话
+      </button>
+      <label class="chat-search">
+        <Search :size="16" aria-hidden="true" />
+        <input v-model="historyQuery" type="search" aria-label="搜索对话" placeholder="搜索对话">
+      </label>
+      <div class="chat-history-list">
+        <p v-if="loadingHistory" class="chat-list-state" role="status">正在加载对话</p>
+        <p v-else-if="!filteredHistory.length" class="chat-list-state">{{ historyQuery ? '没有匹配的对话' : '暂无历史对话' }}</p>
+        <article v-for="row in filteredHistory" :key="row.id" class="chat-history-row"
+          :class="{ 'is-current': current?.id === row.id, 'menu-open': menuId === row.id }">
+          <form v-if="renameId === row.id" class="chat-rename" @submit.prevent="renameConversation">
+            <input id="agent-rename-title" v-model="renameTitle" maxlength="120" aria-label="对话名称">
+            <button class="chat-icon-button" type="submit" aria-label="保存名称" :disabled="!renameTitle.trim()"><Check :size="16" /></button>
+            <button class="chat-icon-button" type="button" aria-label="取消重命名" @click="renameId = null"><X :size="16" /></button>
+          </form>
+          <template v-else>
+            <button class="chat-history-open" type="button" :disabled="busy && current?.id !== row.id"
+              :aria-current="current?.id === row.id ? 'true' : undefined" :title="row.title" @click="openConversation(row.id)">
+              <MessageSquare :size="15" /><span>{{ row.title }}</span>
+              <LoaderCircle v-if="row.busy" class="chat-spin" :size="13" aria-label="正在回复" />
             </button>
-            <button class="agent-history-delete" :aria-label="'删除对话 ' + row.title" :disabled="busy" @click="removeConversation(row)">
-              <Trash2 :size="14" />
-            </button>
+            <button class="chat-icon-button chat-more" type="button" :disabled="busy" :aria-label="'管理对话 ' + row.title"
+              :aria-expanded="menuId === row.id" @click="menuId = menuId === row.id ? null : row.id"><Ellipsis :size="17" /></button>
+            <div v-if="menuId === row.id" class="chat-history-menu">
+              <button type="button" @click="beginRename(row)"><Pencil :size="14" />重命名</button>
+              <button class="chat-delete" type="button" @click="removeConversation(row)"><Trash2 :size="14" />删除</button>
+            </div>
+          </template>
+        </article>
+      </div>
+    </aside>
+
+    <section class="chat-main" aria-label="教师 Agent">
+      <header class="chat-top">
+        <button v-if="!historyOpen" class="chat-icon-button" type="button" aria-label="打开对话历史" title="打开对话历史" @click="historyOpen = true">
+          <PanelLeft :size="19" />
+        </button>
+        <div class="chat-title">
+          <h1>{{ current?.title || '教师 Agent' }}</h1>
+          <span>{{ course?.name }}</span>
+        </div>
+        <button v-if="!historyOpen" class="chat-icon-button chat-new-compact" type="button" aria-label="新建对话"
+          title="新建对话" :disabled="busy" @click="newConversation"><SquarePen :size="19" /></button>
+      </header>
+
+      <div ref="scrollArea" class="chat-scroll" @scroll.passive="trackScroll">
+        <div v-if="loadingConversation || loadingHistory" class="chat-welcome" role="status">
+          <LoaderCircle class="chat-spin" :size="23" /> 正在加载对话
+        </div>
+        <div v-else-if="!messages.length" class="chat-welcome">
+          <span class="chat-orb"><Sparkles :size="26" :stroke-width="1.7" /></span>
+          <h2>今天想处理什么？</h2>
+        </div>
+        <div v-else class="chat-transcript" role="log" aria-label="对话消息" aria-live="polite">
+          <article v-for="message in messages" :key="message.id" class="chat-message" :class="message.role">
+            <template v-if="message.role === 'user'">
+              <span class="sr-only">你</span>
+              <p class="chat-user-bubble">{{ message.content }}</p>
+            </template>
+            <template v-else>
+              <div class="chat-assistant-label"><span class="chat-assistant-icon"><Sparkles :size="16" /></span><strong>Dianoia</strong></div>
+              <div class="chat-reply">
+                <div v-if="['thinking', 'stopping'].includes(message.status)" class="chat-thinking" role="status">
+                  <span class="chat-thinking-dot"></span>{{ message.status === 'stopping' || stopping ? '正在停止' : '正在处理' }}
+                </div>
+                <p v-else-if="message.status === 'failed'" class="chat-failure">{{ message.result?.user_error || message.content || '这次回复未能完成，请稍后重试。' }}</p>
+                <MarkdownContent v-else-if="message.content" :text="message.content" />
+                <p v-else-if="message.status === 'cancelled'" class="muted">已停止生成</p>
+                <p v-else-if="message.status === 'interrupted'" class="muted">服务重启时回复中断，请重新发送。</p>
+                <div v-if="messageArtifacts(message.result).length" class="chat-artifacts">
+                  <RouterLink v-for="card in messageArtifacts(message.result)" :key="card.label + ':' + card.id"
+                    :to="card.route" class="chat-artifact">
+                    <span class="chat-artifact-icon"><component :is="artifactIcons[card.kind] || FileText" :size="19" /></span>
+                    <span><small>{{ card.label }}</small><strong>{{ card.title }}</strong></span>
+                    <ArrowUpRight :size="17" />
+                  </RouterLink>
+                </div>
+                <div v-if="message.status === 'complete' && message.content" class="chat-message-actions">
+                  <button class="chat-icon-button" type="button" :title="copiedId === message.id ? '已复制' : '复制回复'"
+                    :aria-label="copiedId === message.id ? '已复制' : '复制回复'" @click="copyMessage(message)">
+                    <Check v-if="copiedId === message.id" :size="16" /><Copy v-else :size="16" />
+                  </button>
+                </div>
+              </div>
+            </template>
           </article>
         </div>
-      </aside>
+      </div>
 
-      <section class="agent-main" aria-label="教师 Agent">
-        <header class="agent-heading">
-          <div>
-            <h1>{{ current?.title || '教师 Agent' }}</h1>
-            <p>{{ course.name }}<span v-if="current"> · {{ messages.filter((message) => message.role === 'user').length }} 轮对话</span></p>
-          </div>
-        </header>
-
-        <p v-if="error" class="error agent-alert" role="alert">{{ error }}</p>
-        <p v-if="notice" class="agent-notice" role="status">{{ notice }}</p>
-
-        <div class="agent-conversation-wrap">
-          <div v-if="loadingConversation" class="agent-empty" role="status">正在打开对话</div>
-          <div v-else-if="!messages.length" class="agent-empty">
-            <span class="agent-icon"><MessageCircle :size="28" /></span>
-            <h2>今天想处理什么？</h2>
-            <p>我会基于当前课程的资料完成查询、导图、试卷、题库和课件工作。</p>
-          </div>
-
-          <div v-else class="conversation agent-conversation" aria-live="polite">
-            <article v-for="message in messages" :key="message.id" class="agent-message" :class="message.role">
-              <template v-if="message.role === 'user'">
-                <p>{{ message.content }}</p>
-              </template>
-              <template v-else>
-                <div class="agent-message-label"><span>Dianoia</span><small>教师 Agent</small></div>
-                <div v-if="message.status === 'thinking'" class="agent-thinking" role="status">
-                  <span></span><span></span><span></span><em>正在思考</em>
-                </div>
-                <MarkdownContent v-else-if="message.content" :text="message.content" />
-                <p v-else-if="message.status === 'cancelled'" class="muted">已停止生成。</p>
-                <p v-else-if="message.status === 'interrupted'" class="muted">服务重启时这次回复被中断，请重新发送。</p>
-                <p v-else-if="message.status === 'failed'" class="error">这次回复未能完成，请稍后重试。</p>
-                <div v-if="message.content" class="agent-message-actions">
-                  <button @click="copyMessage(message.content)">复制</button>
-                </div>
-                <RouterLink v-for="deck in message.result?.created_presentations || []" :key="deck.id" class="text-link"
-                  :to="'/presentations/' + deck.id">打开课件「{{ deck.title }}」</RouterLink>
-                <RouterLink v-for="candidate in message.result?.presentation_suggestions || []" :key="candidate.id" class="text-link"
-                  :to="{ name: 'presentation', params: { id: candidate.presentation_id }, query: { page: candidate.page, candidate: candidate.id } }">
-                  查看「{{ candidate.title }}」第 {{ candidate.page }} 页候选
-                </RouterLink>
-                <RouterLink v-for="map in message.result?.created_mind_maps || []" :key="map.id" class="text-link"
-                  :to="'/mind-maps/' + map.id">打开导图「{{ map.title }}」</RouterLink>
-                <RouterLink v-for="exam in message.result?.created_exams || []" :key="exam.id" class="text-link"
-                  :to="'/exams/' + exam.id">打开试卷「{{ exam.title }}」</RouterLink>
-                <RouterLink v-for="bank in message.result?.question_banks || []" :key="bank.id" class="text-link"
-                  :to="'/question-banks/' + bank.id">打开题库「{{ bank.title }}」</RouterLink>
-              </template>
-            </article>
-          </div>
-          <span ref="scrollTarget"></span>
-        </div>
-
-        <div class="agent-composer-shell">
-          <div v-if="queue.length" class="agent-queue" aria-label="待发送消息">
+      <footer class="chat-composer-zone">
+        <div class="chat-composer-inner">
+          <button v-if="!atBottom && messages.length" class="chat-icon-button chat-jump" type="button" aria-label="跳到最新消息"
+            title="跳到最新消息" @click="scrollToLatest('smooth')"><ArrowDown :size="18" /></button>
+          <p v-if="error" class="chat-failure chat-notice" role="alert">{{ error }}</p>
+          <p v-else-if="notice" class="chat-notice" role="status">{{ notice }}</p>
+          <div v-if="queue.length" class="chat-queue" aria-label="待发送消息">
             <div v-for="item in queue" :key="item.id">
               <span>{{ item.content }}</span>
-              <button :aria-label="'取消排队 ' + item.content" @click="removeQueued(item.id)">×</button>
+              <button class="chat-icon-button" type="button" :aria-label="'取消排队 ' + item.content" @click="removeQueued(item.id)"><X :size="14" /></button>
             </div>
           </div>
-          <div v-if="busy" class="agent-followup-mode" role="group" aria-label="回复期间的新消息方式">
-            <button :class="{ active: mode === 'queue' }" :aria-pressed="mode === 'queue'" @click="mode = 'queue'">排队</button>
-            <button :class="{ active: mode === 'guide' }" :aria-pressed="mode === 'guide'" @click="mode = 'guide'">引导</button>
-            <span>{{ mode === 'queue' ? '当前回复结束后发送' : '停止当前回复并立即处理' }}</span>
-          </div>
-          <form class="composer agent-composer" @submit.prevent="submit">
-            <textarea v-model="input" aria-label="对话内容" placeholder="输入消息 · Enter 发送，Shift+Enter 换行" rows="3" maxlength="16000" @keydown="handleComposerKeydown"></textarea>
-            <div class="section-heading agent-composer-footer">
-              <span class="muted">{{ busy ? (mode === 'queue' ? '可继续输入并排队' : '将停止当前回复并处理新要求') : '当前回复会自动保存' }}</span>
-              <div class="actions">
-                <button v-if="busy" type="button" class="button subtle" @click="cancelCurrent()"><Square :size="14" /> 停止</button>
-                <button type="submit" class="button primary icon-only" aria-label="发送" :disabled="!input.trim()">
-                  <ArrowUp :size="20" />
-                </button>
+          <form class="chat-composer" @submit.prevent="submit">
+            <textarea ref="composerInput" v-model="input" aria-label="对话内容" placeholder="给教师 Agent 发消息…"
+              rows="1" maxlength="16000" @keydown="handleComposerKeydown"></textarea>
+            <div class="chat-composer-bar">
+              <label v-if="busy" class="chat-mode"><span class="sr-only">回复期间的新消息方式</span>
+                <select v-model="mode" :disabled="stopping">
+                  <option value="queue">排队发送</option>
+                  <option value="guide">停止并引导</option>
+                </select><ChevronDown :size="13" aria-hidden="true" />
+              </label>
+              <span v-else class="chat-keyboard-hint">Shift + Enter 换行</span>
+              <div class="chat-composer-actions">
+                <button v-if="busy" class="chat-icon-button chat-stop" type="button" aria-label="停止回复"
+                  title="停止回复" :disabled="sending || stopping" @click="cancelCurrent()"><Square :size="15" /></button>
+                <button class="chat-send" type="submit" aria-label="发送消息" title="发送消息"
+                  :disabled="!input.trim() || stopping || loadingConversation || loadingHistory"><ArrowUp :size="20" :stroke-width="2.4" /></button>
               </div>
             </div>
           </form>
         </div>
-      </section>
-    </div>
+      </footer>
+    </section>
   </div>
 </template>
+
+<style scoped src="./agent-chat.css"></style>
