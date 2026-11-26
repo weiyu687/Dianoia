@@ -18,6 +18,7 @@ from .course_media import (
     preset_assets, sadtalker_command, save_upload, tts_command,
 )
 from .course_models import CourseAsset, CourseJob, CourseVoiceFolder, CourseVoiceSample, DigitalCourse
+from .course_studio import LAYOUTS, THEMES, StudioSettings, resolve_scene
 from .models import identifier, now
 
 router = APIRouter(prefix="/api/digital-courses", tags=["digital courses"])
@@ -37,11 +38,12 @@ class CourseEdit(BaseModel):
     scripts: list[str] = Field(min_length=1, max_length=40)
     avatar: str = Field(default="", max_length=64)
     voice: str = Field(default="", max_length=64)
+    studio: StudioSettings | None = None
 
 
 class StartJob(BaseModel):
     revision: int = Field(ge=1)
-    kind: Literal["scripts", "video", "audio"]
+    kind: Literal["scripts", "video", "audio", "preview"]
     page: int | None = Field(default=None, ge=1, le=40)
     replace_existing: bool = False
 
@@ -145,10 +147,12 @@ def project_view(db, row, *, detail=True):
     video = db.get(CourseJob, row.video_id) if row.video_id else None
     job = current_job(db, row)
     audio_available = bool(job and job.kind == "audio" and job.status == "succeeded" and job.input["revision"] == row.revision)
+    preview_available = bool(job and job.kind == "preview" and job.status == "succeeded" and job.input["revision"] == row.revision)
     result.update(job=job_view(job), page_count=len(row.slides), has_video=bool(video), audio_available=audio_available,
-                  video_is_previous=bool(video and video.input["revision"] != row.revision))
+                  preview_available=preview_available, video_is_previous=bool(video and video.input["revision"] != row.revision))
     if detail:
         result["slides"] = row.slides
+        result["studio"] = StudioSettings.model_validate(row.studio).model_dump()
     return result
 
 
@@ -170,6 +174,11 @@ def list_projects(course_id: int, db: DB, user: Teacher):
     rows = db.scalars(select(DigitalCourse).where(DigitalCourse.owner_id == user.id, DigitalCourse.course_id == course_id)
                       .order_by(DigitalCourse.updated_at.desc())).all()
     return [project_view(db, row, detail=False) for row in rows]
+
+
+@router.get("/studio-presets")
+def studio_presets(user: Teacher):
+    return {"themes": THEMES, "layouts": LAYOUTS}
 
 
 @router.post("", status_code=201)
@@ -345,8 +354,11 @@ def edit_project(project_id: str, data: CourseEdit, db: DB, user: Teacher):
     if data.voice and data.voice != row.voice:
         asset_option(db, user, data.voice, "voice")
     slides = [slide | {"script": text.strip()} for slide, text in zip(row.slides, data.scripts)]
+    if data.studio and len(data.studio.pages) > len(slides):
+        raise HTTPException(422, "分镜设置超过课件页数")
+    studio = data.studio.model_dump() if data.studio else row.studio
     update_project(db, row, data.revision, title=data.title.strip(), slides=slides,
-                   avatar=data.avatar, voice=data.voice, revision=data.revision + 1)
+                   avatar=data.avatar, voice=data.voice, studio=studio, revision=data.revision + 1)
     db.commit()
     return project_view(db, row)
 
@@ -376,28 +388,35 @@ def start_job(project_id: str, data: StartJob, db: DB, user: Teacher):
         i for i, slide in enumerate(row.slides) if data.replace_existing or not slide["script"]
     ]
     spec = {"revision": data.revision}
+    avatar = None
     folder = job_path(row.id, identifier())
     if data.kind == "scripts":
         if not indexes or any(index >= len(row.slides) for index in indexes):
             raise HTTPException(422, "没有需要生成口播稿的页面")
         spec["indexes"] = indexes
     else:
-        if data.kind == "audio" and (not data.page or data.page > len(row.slides)):
-            raise HTTPException(422, "请选择需要试听的页面")
-        scripts = [row.slides[data.page - 1]["script"]] if data.kind == "audio" else [slide["script"] for slide in row.slides]
+        single_page = data.kind in {"audio", "preview"}
+        if single_page and (not data.page or data.page > len(row.slides)):
+            raise HTTPException(422, "请选择需要预览或试听的页面")
+        page_indexes = [data.page - 1] if single_page else list(range(len(row.slides)))
+        scripts = [row.slides[index]["script"] for index in page_indexes]
         if not row.voice or any(not text.strip() for text in scripts):
             raise HTTPException(422, "请选择音色并填写需要生成的口播稿")
-        if data.kind == "video" and not row.avatar:
-            raise HTTPException(422, "请先选择讲师形象")
-        avatar = asset_option(db, user, row.avatar, "avatar") if data.kind == "video" else None
+        if data.kind in {"video", "preview"}:
+            studio = StudioSettings.model_validate(row.studio)
+            if any(resolve_scene(studio, index, len(row.slides))["avatar"] for index in page_indexes):
+                if not row.avatar:
+                    raise HTTPException(422, "包含讲师出镜的页面需要选择讲师形象")
+                avatar = asset_option(db, user, row.avatar, "avatar")
+            spec.update(studio=studio.model_dump(), title=row.title, total_pages=len(row.slides))
         voice = asset_option(db, user, row.voice, "voice")
         try:
             tts_command(voice.get("preset"))
-            if data.kind == "video":
+            if avatar:
                 sadtalker_command()
         except CourseMediaError as error:
             raise HTTPException(503, str(error)) from error
-        spec.update(scripts=scripts, page=data.page if data.kind == "audio" else None, preset=voice.get("preset"),
+        spec.update(scripts=scripts, page=data.page if single_page else None, preset=voice.get("preset"),
                     transcript=voice.get("transcript", ""))
     previous = db.get(CourseJob, row.job_id) if row.job_id else None
     update_project(db, row, data.revision, job_id=folder.name)
@@ -418,7 +437,7 @@ def start_job(project_id: str, data: StartJob, db: DB, user: Teacher):
     except Exception:
         shutil.rmtree(folder, ignore_errors=True)
         raise
-    if previous and previous.kind == "audio":
+    if previous and previous.kind in {"audio", "preview"}:
         shutil.rmtree(job_path(row.id, previous.id), ignore_errors=True)
     return project_view(db, row)
 
@@ -441,3 +460,15 @@ def course_video(project_id: str, db: DB, user: Teacher, download: bool = False)
     if not path.is_file():
         raise HTTPException(404, "课程视频已不可用")
     return FileResponse(path, media_type="video/mp4", filename=f"{row.title}.mp4" if download else None)
+
+
+@router.get("/{project_id}/preview-video")
+def preview_video(project_id: str, db: DB, user: Teacher):
+    row = find_project(db, user, project_id)
+    job = current_job(db, row)
+    if not job or job.kind != "preview" or job.status != "succeeded" or job.input["revision"] != row.revision:
+        raise HTTPException(404, "这页暂无可用的成片预览")
+    path = job_path(row.id, job.id) / "preview.mp4"
+    if not path.is_file():
+        raise HTTPException(404, "成片预览已不可用")
+    return FileResponse(path, media_type="video/mp4")

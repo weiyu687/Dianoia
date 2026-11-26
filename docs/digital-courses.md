@@ -8,9 +8,17 @@
 - 从 `backend` 目录使用项目 Python 环境运行 `python -m app.course_worker`。首版每个部署运行一个 worker。让 worker 和 Web API 使用同一 `DIANOIA_DATABASE_URL`、`DIANOIA_DATA_DIR`、文件访问权限和 LLM 配置。部署到 Linux GPU 主机时，API 与 worker 可以同机运行。进程管理器应在退出时重启 worker。
 - 正常上传后可直接编写口播稿。AI 讲稿会进入队列。视频生产包括逐页合成语音、生成数字人、合成课件画面和合并 MP4。处理中的项目可离开页面后返回。运行任务失联超过两分钟后标记失败，可重新提交。整稿视频按任务新建，已成功的上一版在重制完成前可以继续下载。
 
+## 分镜与试看
+
+在编辑器的「画面预览」中选择背景主题和整课分镜。自动分镜让首尾页在演播室中出镜，正文页以课件全屏展示。可单独将某页改为演播室、全屏或画中画。画中画覆盖课件右下角，排版时可在画布确认遮挡。课件全屏只需声音，包含讲师的页面还需选定形象。
+
+「试看本页」用该页开头的口播生成最多 12 秒的独立短片。短片使用正式生产的主题、构图、音色和讲师引擎，适用于检查文字可读性、音量和口型，整课成片保留在下方。改动并保存后可重新提交试看。成片为 1920×1080、25 fps 的 H.264/AAC MP4，保留原课件比例。新导入课件按更高分辨率渲染，旧项目可重新导入源文件以获得清晰原图。
+
+服务器需要可绘制中文的系统字体。Windows 优先使用微软雅黑，Linux 可安装 Noto Sans CJK，也可用 `DIANOIA_COURSE_FONT` 指定字体文件。升级时 SQLite 由 API 和数字课程 worker 启动时迁移，PostgreSQL 在启动前执行 `python -m app.migrate`，迁移版本为 `20261126_05`。
+
 ## 模型环境
 
-Dianoia 使用 SadTalker 的 512 人脸模型，按完整照片模式保留讲师的原图构图。处理长讲稿时，worker 按不超过 12 秒的音频片段渲染讲师并合并，再和课件及原始讲稿音轨一起封装为 720p MP4。
+Dianoia 使用 SadTalker 的 512 人脸模型，按完整照片模式保留讲师的原图构图。处理长讲稿时，worker 按不超过 12 秒的音频片段渲染出镜页面，再和课程背景、课件及讲稿音轨合成。画面升级沿用现有权重，人物动作范围由 SadTalker 决定。
 
 | 变量 | 取值 |
 | --- | --- |
@@ -42,7 +50,7 @@ Invoke-WebRequest "$facexlib/alignment_WFLW_4HG.pth" -OutFile "$face/alignment_W
 Invoke-WebRequest "$facexlib/detection_Resnet50_Final.pth" -OutFile "$face/detection_Resnet50_Final.pth"
 ```
 
-原版 CLI 在独立环境内启动。Dianoia 的启动脚本处理上游旧版库接口，并通过参数列表传给配置的 FFmpeg。推理前会检查四个官方权重的文件大小。先在编辑器选用预置形象和预置音色，制作两页短课件并检查旁置画面、口型及声音，再验收正式课程。当前成片采用静态课件画面，PPT 动画、内嵌媒体和字幕属于后续版式能力。[SadTalker 安装说明](https://github.com/OpenTalker/SadTalker/blob/main/docs/install.md) · [官方权重](https://github.com/OpenTalker/SadTalker/releases/expanded_assets/v0.0.2-rc)
+原版 CLI 在独立环境内启动。Dianoia 的启动脚本处理上游旧版库接口，并通过参数列表传给配置的 FFmpeg。推理前会检查四个官方权重的文件大小。先用「试看本页」核对画面、口型和声音，再提交正式课程。课件在视频中按页静态展示，PPT 动画、内嵌媒体和字幕待后续接入。[SadTalker 安装说明](https://github.com/OpenTalker/SadTalker/blob/main/docs/install.md) · [官方权重](https://github.com/OpenTalker/SadTalker/releases/expanded_assets/v0.0.2-rc)
 
 2026-11-19 本机验收通过。RTX 4070 SUPER 12GB、Windows、Python 3.12 与上述 CUDA 环境，经常规 API 用预置形象和 Kokoro 语音生成两页课程。成片长 23.701 秒，处理耗时 244 秒，测试期间 GPU 总显存峰值 6966 MiB。该数字包括测试前约 1170 MiB 的桌面占用。结果用于确认此配置可完成短课件，正式长课程应继续检验段间表情过渡及不同照片。
 

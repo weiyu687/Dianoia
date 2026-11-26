@@ -150,6 +150,12 @@ Alembic 基线兼容已有本地表，不重建或清空现有业务数据；本
 
 生成质量参考 2026 年 SagE-QG 对阅读理解技能与证据关联的研究，以及 2025 年高校形成性练习与反馈研究。产品采用按知识点及资料范围生成、记录来源、教师确认后发布的流程；这不代表已验证所有学科的正确率或本平台的学习效果。[SagE-QG](https://aclanthology.org/2026.findings-emnlp.424/) · [高校形成性练习与反馈](https://aclanthology.org/2025.aimecon-main.36/)
 
+### 2026-11-26｜数字课程分镜与画面质量
+
+本轮升级沿用 SadTalker、现有音色、LibreOffice 和 FFmpeg 7.0.2。采用自动分镜、演播室、课件全屏和画中画，网页预览和 1080p 成片复用同一份构图参数。自动分镜让讲师在讲次首尾出镜，正文优先保证课件可读性。Alembic `20261126_05` 为项目保存分镜设置，视频任务记录配置快照，支持先生产当前页短片。Pillow 绘制背景和课程信息条，FFmpeg 合成图层、规范语音音量并编码。[Harvard CS50P 实际课程](https://cs50.harvard.edu/python/weeks/0/) · [讯飞智作教程](https://h5.peiyinge.com/video-editor/tutorial) · [慕课视频观看行为研究](https://learningatscale.acm.org/las2014/talks/paper_philip_guo2.pdf) · [FFmpeg 滤镜](https://ffmpeg.org/ffmpeg-filters.html)
+
+半身和全身动作属于独立引擎选型。用教师半身视频和 MuseTalk 1.5 做口型重配，可沿用原片手势。核心权重 3.4 GB，加推理依赖预计约 4.4–5 GB。官方在 Windows 4 GB RTX 3050 Ti Laptop 上用半精度处理 8 秒约 5 分钟。本机未实测。EchoMimicV2 可生成半身动作，官方权重仓库约 11.2 GB，另有模型依赖。官方验证设备含 16 GB V100，A100 上加速版约 50 秒处理 120 帧。本机为 RTX 4070 SUPER 12 GB，负责人确认先验收分镜样片，暂缓下载新权重。[MuseTalk 官方运行说明](https://github.com/TMElyralab/MuseTalk) · [MuseTalk 1.5 权重](https://huggingface.co/TMElyralab/MuseTalk/blob/main/musetalkV15/unet.pth) · [EchoMimicV2 官方运行说明](https://github.com/antgroup/echomimic_v2) · [EchoMimicV2 权重](https://huggingface.co/BadToBest/EchoMimicV2/tree/main)
+
 ## 待验证和待选型
 
 - 资料向量检索的候选为 PostgreSQL + pgvector 与 Qwen3-Embedding。以真实中文课程样本比较证据召回、章节切分与引用页码后再确认。

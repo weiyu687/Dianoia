@@ -16,6 +16,7 @@ class DigitalCourse(Base):
     title: Mapped[str] = mapped_column(String(160))
     filename: Mapped[str] = mapped_column(String(255))
     slides: Mapped[list] = mapped_column(JSON)
+    studio: Mapped[dict] = mapped_column(JSON, default=dict, server_default="{}")
     avatar: Mapped[str] = mapped_column(String(64), default="")
     voice: Mapped[str] = mapped_column(String(64), default="")
     revision: Mapped[int] = mapped_column(Integer, default=1)

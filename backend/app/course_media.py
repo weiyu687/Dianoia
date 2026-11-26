@@ -108,7 +108,7 @@ def import_deck(source, folder):
     reader = PdfReader(pdf)
     if not 1 <= len(reader.pages) <= MAX_SLIDES or (notes and len(notes) != len(reader.pages)):
         raise CourseMediaError(f"课件需要包含 1 至 {MAX_SLIDES} 页，且预览页数须与源文件一致")
-    run([executable("pdftoppm"), "-r", "110", "-scale-to", "1440", "-png", str(pdf), str(folder / "slide")])
+    run([executable("pdftoppm"), "-r", "150", "-scale-to", "1920", "-png", str(pdf), str(folder / "slide")])
     for index, image in enumerate(sorted(folder.glob("slide-*.png")), 1):
         image.rename(folder / f"page-{index}.png")
     slides = []

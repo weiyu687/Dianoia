@@ -12,6 +12,7 @@ const path = workspace + '/' + useRoute().params.id
 const project = ref(null)
 const assets = ref([])
 const folders = ref([])
+const studioPresets = ref({ themes: {}, layouts: {} })
 const materialKind = ref('avatar')
 const materialSource = ref('official')
 const index = ref(0)
@@ -33,6 +34,35 @@ const readable = (page) => Boolean(page?.text?.trim() || page?.notes?.trim())
 const readablePages = computed(() => project.value?.slides.some(readable))
 const missingPages = computed(() => project.value?.slides.some((page) => readable(page) && !page.script.trim()))
 const chosenAvatar = computed(() => assets.value.find((asset) => asset.id === project.value?.avatar))
+const selectedTheme = computed(() => studioPresets.value.themes[project.value?.studio?.theme])
+const pageScene = computed(() => project.value?.studio?.pages[index.value] || 'auto')
+function sceneKey(i) {
+  const studio = project.value.studio
+  const override = studio.pages[i]
+  if (override && override !== 'auto') return override
+  if (studio.layout !== 'auto') return studio.layout
+  return i === 0 || i === project.value.page_count - 1 ? 'studio' : 'focus'
+}
+const scene = computed(() => project.value && studioPresets.value.layouts[sceneKey(index.value)])
+const hasPresenterScenes = computed(() => project.value?.slides.some((_, i) => sceneKey(i) !== 'focus'))
+const sceneStyle = computed(() => {
+  const theme = selectedTheme.value
+  if (!theme) return {}
+  return {
+    '--stage-top': theme.top, '--stage-bottom': theme.bottom,
+    '--stage-ink': theme.ink, '--stage-accent': theme.accent,
+    '--stage-frame': theme.frame, '--stage-matte': theme.matte,
+  }
+})
+function placement(bounds) {
+  const [x, y, width, height] = bounds
+  return { left: `${x / 19.2}%`, top: `${y / 10.8}%`, width: `${width / 19.2}%`, height: `${height / 10.8}%` }
+}
+function chooseScene(value) {
+  project.value.studio.pages = Array.from({ length: project.value.page_count }, (_, i) =>
+    i === index.value ? value : project.value.studio.pages[i] || 'auto')
+  changed.value = true
+}
 const options = computed(() => {
   const grouped = new Set(folders.value.flatMap((folder) => folder.samples.map((sample) => sample.id)))
   return [
@@ -48,6 +78,7 @@ const visibleMaterials = computed(() => options.value.filter((asset) => asset.ki
   asset.preset === (materialSource.value === 'official')))
 const video = '/api' + path + '/video'
 const audio = '/api' + path + '/audio'
+const videoPreview = '/api' + path + '/preview-video'
 const preview = (id) => '/api' + workspace + '/assets/' + id + '/preview'
 const slideImage = (i) => '/api' + path + '/pages/' + (i + 1)
 
@@ -77,10 +108,13 @@ function leave(event) {
 onMounted(async () => {
   window.addEventListener('beforeunload', leave)
   try {
-    const [data, catalog, voiceFolders] = await Promise.all([api(path), api(workspace + '/assets'), api(workspace + '/voice-folders')])
+    const [data, catalog, voiceFolders, presets] = await Promise.all([
+      api(path), api(workspace + '/assets'), api(workspace + '/voice-folders'), api(workspace + '/studio-presets'),
+    ])
     if (disposed) return
     assets.value = catalog
     folders.value = voiceFolders
+    studioPresets.value = presets
     receive(data)
   } catch (failure) { error.value = failure.message }
 })
@@ -93,8 +127,10 @@ onBeforeRouteLeave(() => !changed.value || window.confirm('还有未保存的修
 
 async function save() {
   if (!changed.value) return
-  const { title, avatar, voice, revision, slides } = project.value
-  const value = await api(path, { method: 'PUT', body: { title, avatar, voice, revision, scripts: slides.map((page) => page.script) } })
+  const { title, avatar, voice, revision, slides, studio } = project.value
+  const value = await api(path, {
+    method: 'PUT', body: { title, avatar, voice, revision, studio, scripts: slides.map((page) => page.script) },
+  })
   changed.value = false
   receive(value)
 }
@@ -146,7 +182,7 @@ async function remove() {
           <button class="button secondary" :disabled="locked || !readablePages" @click="act('scripts', 'all')"><Sparkles :size="16" /> 一键生成全部讲稿</button>
           <button class="button subtle icon-only danger-text" title="删除项目" aria-label="删除项目" :disabled="locked" @click="deleting = true"><Trash2 :size="16" /></button>
           <button class="button secondary" :disabled="locked || !changed" @click="act('save')"><Save :size="16" /> 保存</button>
-          <button class="button primary" :disabled="locked || !isComplete || !chosenAvatar || !chosenVoice" @click="act('video')"><Film :size="17" /> 生产视频</button>
+          <button class="button primary" :disabled="locked || !isComplete || (hasPresenterScenes && !chosenAvatar) || !chosenVoice" @click="act('video')"><Film :size="17" /> 生产视频</button>
         </div>
       </header>
       <section v-if="job" class="panel digital-job" aria-label="生产进度">
@@ -165,14 +201,31 @@ async function remove() {
         </aside>
         <div class="digital-center">
           <section class="digital-preview" aria-label="课件预览">
-            <div class="digital-stage-bar"><span>画面预览</span><small>16:9 · 720p</small></div>
-            <div class="digital-slide-frame">
-              <div class="digital-stage-deck"><img :src="slideImage(index)" :alt="'第 ' + (index + 1) + ' 页课件预览'"></div>
-              <div class="digital-stage-avatar">
+            <div class="digital-stage-bar"><strong>画面预览</strong><small>{{ scene?.name }} · 16:9 · 1080p</small></div>
+            <div v-if="scene" class="digital-slide-frame" :style="sceneStyle">
+              <div class="digital-stage-caption"><span>{{ project.title }}</span><span>{{ String(index + 1).padStart(2, '0') }} / {{ String(project.page_count).padStart(2, '0') }}</span></div>
+              <div class="digital-stage-deck" :style="placement(scene.slide)">
+                <img :src="slideImage(index)" :alt="'第 ' + (index + 1) + ' 页课件预览'">
+              </div>
+              <div v-if="scene.avatar" class="digital-stage-avatar" :style="placement(scene.avatar)">
                 <img v-if="chosenAvatar" :src="preview(chosenAvatar.id)" :alt="chosenAvatar.name">
                 <button v-else class="button subtle" @click="materialKind = 'avatar'"><UserRound :size="18" /> 选择讲师</button>
               </div>
             </div>
+            <div class="digital-scene-controls">
+              <label>背景主题<select v-model="project.studio.theme" :disabled="locked" @change="changed = true">
+                <option v-for="(theme, key) in studioPresets.themes" :key="key" :value="key">{{ theme.name }}</option>
+              </select></label>
+              <label>整课分镜<select v-model="project.studio.layout" :disabled="locked" @change="changed = true">
+                <option value="auto">自动分镜</option>
+                <option v-for="(item, key) in studioPresets.layouts" :key="key" :value="key">{{ item.name }}</option>
+              </select></label>
+              <label>本页构图<select :value="pageScene" :disabled="locked" @change="chooseScene($event.target.value)">
+                <option value="auto">继承整课设置</option>
+                <option v-for="(item, key) in studioPresets.layouts" :key="key" :value="key">{{ item.name }}</option>
+              </select></label>
+            </div>
+            <p v-if="sceneKey(index) === 'pip'" class="muted">讲师画面覆盖课件右下角，可在预览中检查是否挡住内容。</p>
             <div class="digital-page-nav">
               <button class="button subtle icon-only" aria-label="上一页" :disabled="!index" @click="index--"><ChevronLeft :size="18" /></button>
               <span>{{ index + 1 }} / {{ project.page_count }}</span>
@@ -183,10 +236,14 @@ async function remove() {
             <div class="section-heading"><h2>第 {{ index + 1 }} 页口播稿</h2><small>{{ slide.script.length }} / 1500 字</small></div>
             <div class="actions">
               <button class="button secondary" :disabled="locked || !slide.script.trim() || !chosenVoice" @click="act('audio', 'page')"><Headphones :size="16" /> 试听本页讲稿</button>
+              <button class="button secondary" :disabled="locked || !slide.script.trim() || !chosenVoice || (scene?.avatar && !chosenAvatar)"
+                title="生成本页开头最多 12 秒的成片" @click="act('preview', 'page')"><Film :size="16" /> 试看本页</button>
               <button class="button subtle" :disabled="locked || !readable(slide)" @click="act('scripts', 'page')"><Sparkles :size="15" /> AI 生成本页</button>
               <button class="button subtle" :disabled="locked || !missingPages" @click="act('scripts')">补齐空白页</button>
             </div>
             <audio v-if="project.audio_available && !changed && job.page === index + 1" :key="job.id" :src="audio" controls aria-label="播放本页合成讲稿" />
+            <video v-if="project.preview_available && !changed && job.page === index + 1"
+              class="digital-short-preview" :key="job.id" :src="videoPreview" controls playsinline preload="metadata" aria-label="本页成片试看片段" />
             <textarea v-model="slide.script" :disabled="locked" maxlength="1500" rows="7" aria-label="本页口播稿"
               placeholder="输入讲稿，或用本页课件和讲者备注生成初稿。" @input="changed = true" />
             <p v-if="!readable(slide)" class="muted">本页无可读文字，可以查看预览后手动撰写。</p>
