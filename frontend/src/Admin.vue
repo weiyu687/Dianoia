@@ -9,6 +9,7 @@ import Modal from './components/Modal.vue'
 import ThemeButton from './components/ThemeButton.vue'
 
 const ready = ref(false)
+const sessionError = ref('')
 const overview = ref(null)
 const workbook = ref(null)
 const result = ref(null)
@@ -29,11 +30,15 @@ watch(user, (profile) => {
   if (profile) load()
   else { overview.value = null; workbook.value = null; result.value = null; notice.value = '' }
 })
-onMounted(async () => {
+async function restoreSession() {
+  ready.value = false
+  sessionError.value = ''
   try { await restore('admin') }
-  catch (failure) { error.value = failure.message }
+  catch (failure) { sessionError.value = failure.message }
   finally { ready.value = true }
-})
+}
+
+onMounted(restoreSession)
 
 async function template() {
   try { await download('/admin/template', 'dianoia-import.xlsx') }
@@ -82,7 +87,7 @@ async function signOut() {
 
 <template>
   <div v-if="!ready" class="full-state" role="status">正在加载学校管理</div>
-  <Login v-else-if="!user" role="admin" />
+  <Login v-else-if="!user" role="admin" :session-error="sessionError" @retry="restoreSession" />
   <div v-else class="admin-shell">
     <header class="topbar admin-top"><Brand subtitle="学校管理" /><div class="actions"><ThemeButton /><span class="muted">{{ user.name }}</span><button class="button subtle" @click="signOut"><LogOut :size="16" /> 退出</button></div></header>
     <main class="page admin-page">

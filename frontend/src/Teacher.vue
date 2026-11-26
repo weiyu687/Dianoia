@@ -10,6 +10,7 @@ import ThemeButton from './components/ThemeButton.vue'
 const route = useRoute()
 const router = useRouter()
 const ready = ref(false)
+const sessionError = ref('')
 const error = ref('')
 const navigationOpen = ref(false)
 const items = [
@@ -25,11 +26,15 @@ const items = [
   { to: '/agent', label: '教师 Agent', icon: MessageCircle, routes: ['agent'] },
 ]
 
-onMounted(async () => {
+async function restoreSession() {
+  ready.value = false
+  sessionError.value = ''
   try { await restore('teacher') }
-  catch (failure) { error.value = failure.message }
+  catch (failure) { sessionError.value = failure.message }
   finally { ready.value = true }
-})
+}
+
+onMounted(restoreSession)
 
 function selectCourse(event) {
   const next = event.target.value
@@ -55,7 +60,7 @@ async function signOut() {
 
 <template>
   <div v-if="!ready" class="full-state" role="status">正在加载工作台</div>
-  <Login v-else-if="!user" role="teacher" />
+  <Login v-else-if="!user" role="teacher" :session-error="sessionError" @retry="restoreSession" />
   <div v-else class="teacher-shell" :class="{ 'nav-open': navigationOpen, 'teacher-chat': route.name === 'agent' }">
     <aside class="navigation">
       <Brand />

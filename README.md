@@ -13,10 +13,12 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r backend/requirements.txt
 Set-Location backend
 ..\.venv\Scripts\python.exe -m app.seed
-..\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
+..\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
 初始化命令提示输入本机虚拟账号的密码，默认创建教师 `teacher`、管理员 `admin` 和示例课程。若要验证独立 Agent，对应的安装文件是 `backend/requirements-agent.txt`。
+
+本地只启动一个后端实例。启动后可打开 [后端健康检查](http://127.0.0.1:8000/api/health)。后端代码变更后，在原终端按 `Ctrl+C` 停止服务，再运行上面的启动命令。页面的登录状态检查在 10 秒无响应后会显示错误和重试入口。
 
 在另一个终端从仓库根目录启动前端。
 

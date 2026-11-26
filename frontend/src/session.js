@@ -16,13 +16,31 @@ export function useProfile(profile) {
   if (!course.value) changeCourse(profile?.courses[0]?.id)
 }
 
+async function requestSession(path, options) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 10000)
+  try {
+    return await api(path, { ...options, signal: controller.signal })
+  } catch (failure) {
+    if (controller.signal.aborted) throw new Error('后端响应超时，请稍后重试')
+    if (failure instanceof TypeError) throw new Error('无法连接后端，请检查服务是否运行')
+    throw failure
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 export async function restore(role) {
   try {
-    const profile = await api('/auth/me')
+    const profile = await requestSession('/auth/me')
     if (profile.role === role) useProfile(profile)
   } catch (error) {
     if (error.status !== 401) throw error
   }
+}
+
+export async function signIn(credentials) {
+  useProfile(await requestSession('/auth/login', { method: 'POST', body: credentials }))
 }
 
 export async function logout() {

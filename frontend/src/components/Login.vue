@@ -1,12 +1,15 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { ArrowRight, LockKeyhole } from 'lucide-vue-next'
-import { api } from '../api'
-import { useProfile } from '../session'
+import { signIn } from '../session'
 import Brand from './Brand.vue'
 import ThemeButton from './ThemeButton.vue'
 
-const props = defineProps({ role: { type: String, required: true } })
+const props = defineProps({
+  role: { type: String, required: true },
+  sessionError: { type: String, default: '' },
+})
+const emit = defineEmits(['retry'])
 const portal = computed(() => props.role === 'admin' ? '学校管理' : '教师工作台')
 const username = ref('')
 const password = ref('')
@@ -17,7 +20,7 @@ async function login() {
   loading.value = true
   error.value = ''
   try {
-    useProfile(await api('/auth/login', { method: 'POST', body: { username: username.value, password: password.value, role: props.role } }))
+    await signIn({ username: username.value, password: password.value, role: props.role })
     password.value = ''
   } catch (failure) {
     error.value = failure.message
@@ -35,6 +38,10 @@ async function login() {
       <main class="login-panel">
         <span class="icon-box"><LockKeyhole :size="20" /></span>
         <h1>{{ portal }}登录</h1>
+        <div v-if="sessionError" class="error">
+          <p role="alert">登录状态检查失败。{{ sessionError }}</p>
+          <button class="button secondary" type="button" :disabled="loading" @click="emit('retry')">重新检查</button>
+        </div>
         <form class="stack" @submit.prevent="login">
           <label>账号<input v-model.trim="username" autocomplete="username" maxlength="64" required placeholder="输入学校账号"></label>
           <label>密码<input v-model="password" type="password" autocomplete="current-password" maxlength="256" required placeholder="输入密码"></label>
