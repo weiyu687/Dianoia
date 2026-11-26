@@ -12,7 +12,9 @@ const path = workspace + '/' + useRoute().params.id
 const project = ref(null)
 const assets = ref([])
 const folders = ref([])
-const studioPresets = ref({ themes: {}, layouts: {} })
+const studioPresets = ref(null)
+const studioLoading = ref(false)
+const studioError = ref('')
 const materialKind = ref('avatar')
 const materialSource = ref('official')
 const index = ref(0)
@@ -34,16 +36,18 @@ const readable = (page) => Boolean(page?.text?.trim() || page?.notes?.trim())
 const readablePages = computed(() => project.value?.slides.some(readable))
 const missingPages = computed(() => project.value?.slides.some((page) => readable(page) && !page.script.trim()))
 const chosenAvatar = computed(() => assets.value.find((asset) => asset.id === project.value?.avatar))
-const selectedTheme = computed(() => studioPresets.value.themes[project.value?.studio?.theme])
+const studioAvailable = computed(() => !!project.value?.studio && !!studioPresets.value)
+const selectedTheme = computed(() => studioPresets.value?.themes[project.value?.studio?.theme])
 const pageScene = computed(() => project.value?.studio?.pages[index.value] || 'auto')
 function sceneKey(i) {
   const studio = project.value.studio
+  if (!studio) return 'studio'
   const override = studio.pages[i]
   if (override && override !== 'auto') return override
   if (studio.layout !== 'auto') return studio.layout
   return i === 0 || i === project.value.page_count - 1 ? 'studio' : 'focus'
 }
-const scene = computed(() => project.value && studioPresets.value.layouts[sceneKey(index.value)])
+const scene = computed(() => studioAvailable.value ? studioPresets.value.layouts[sceneKey(index.value)] : null)
 const hasPresenterScenes = computed(() => project.value?.slides.some((_, i) => sceneKey(i) !== 'focus'))
 const sceneStyle = computed(() => {
   const theme = selectedTheme.value
@@ -84,8 +88,25 @@ const slideImage = (i) => '/api' + path + '/pages/' + (i + 1)
 
 function receive(value) {
   project.value = value
+  if (value.studio && !studioPresets.value && !studioLoading.value && !studioError.value) loadStudio()
   clearTimeout(timer)
   if (active.value && !disposed) timer = setTimeout(refresh, 1800)
+}
+
+async function loadStudio() {
+  if (studioLoading.value) return
+  studioLoading.value = true
+  studioError.value = ''
+  try {
+    const presets = await api(workspace + '/studio-presets')
+    if (!disposed) studioPresets.value = presets
+  } catch (failure) {
+    if (!disposed) studioError.value = failure.status === 404
+      ? '当前后端未提供分镜设置，请重启新版后端后再试。'
+      : '暂时无法读取分镜设置，请重试。'
+  } finally {
+    studioLoading.value = false
+  }
 }
 
 async function refresh() {
@@ -108,13 +129,12 @@ function leave(event) {
 onMounted(async () => {
   window.addEventListener('beforeunload', leave)
   try {
-    const [data, catalog, voiceFolders, presets] = await Promise.all([
-      api(path), api(workspace + '/assets'), api(workspace + '/voice-folders'), api(workspace + '/studio-presets'),
+    const [data, catalog, voiceFolders] = await Promise.all([
+      api(path), api(workspace + '/assets'), api(workspace + '/voice-folders'),
     ])
     if (disposed) return
     assets.value = catalog
     folders.value = voiceFolders
-    studioPresets.value = presets
     receive(data)
   } catch (failure) { error.value = failure.message }
 })
@@ -201,7 +221,7 @@ async function remove() {
         </aside>
         <div class="digital-center">
           <section class="digital-preview" aria-label="课件预览">
-            <div class="digital-stage-bar"><strong>画面预览</strong><small>{{ scene?.name }} · 16:9 · 1080p</small></div>
+            <div class="digital-stage-bar"><strong>画面预览</strong><small v-if="scene">{{ scene.name }} · 16:9 · 1080p</small></div>
             <div v-if="scene" class="digital-slide-frame" :style="sceneStyle">
               <div class="digital-stage-caption"><span>{{ project.title }}</span><span>{{ String(index + 1).padStart(2, '0') }} / {{ String(project.page_count).padStart(2, '0') }}</span></div>
               <div class="digital-stage-deck" :style="placement(scene.slide)">
@@ -212,7 +232,8 @@ async function remove() {
                 <button v-else class="button subtle" @click="materialKind = 'avatar'"><UserRound :size="18" /> 选择讲师</button>
               </div>
             </div>
-            <div class="digital-scene-controls">
+            <img v-else class="digital-source-preview" :src="slideImage(index)" :alt="'第 ' + (index + 1) + ' 页课件预览'">
+            <div v-if="studioAvailable" class="digital-scene-controls">
               <label>背景主题<select v-model="project.studio.theme" :disabled="locked" @change="changed = true">
                 <option v-for="(theme, key) in studioPresets.themes" :key="key" :value="key">{{ theme.name }}</option>
               </select></label>
@@ -225,7 +246,12 @@ async function remove() {
                 <option v-for="(item, key) in studioPresets.layouts" :key="key" :value="key">{{ item.name }}</option>
               </select></label>
             </div>
-            <p v-if="sceneKey(index) === 'pip'" class="muted">讲师画面覆盖课件右下角，可在预览中检查是否挡住内容。</p>
+            <p v-if="studioError" class="muted" role="status">
+              {{ studioError }} <button type="button" class="button subtle" @click="loadStudio">重试</button>
+            </p>
+            <p v-else-if="!project.studio" class="muted">课件已载入。当前后端版本支持基础编辑，重启新版后端后可使用分镜和本页试看。</p>
+            <p v-else-if="studioLoading" class="muted" role="status">正在读取分镜设置</p>
+            <p v-else-if="sceneKey(index) === 'pip'" class="muted">讲师画面覆盖课件右下角，可在预览中检查是否挡住内容。</p>
             <div class="digital-page-nav">
               <button class="button subtle icon-only" aria-label="上一页" :disabled="!index" @click="index--"><ChevronLeft :size="18" /></button>
               <span>{{ index + 1 }} / {{ project.page_count }}</span>
@@ -236,7 +262,7 @@ async function remove() {
             <div class="section-heading"><h2>第 {{ index + 1 }} 页口播稿</h2><small>{{ slide.script.length }} / 1500 字</small></div>
             <div class="actions">
               <button class="button secondary" :disabled="locked || !slide.script.trim() || !chosenVoice" @click="act('audio', 'page')"><Headphones :size="16" /> 试听本页讲稿</button>
-              <button class="button secondary" :disabled="locked || !slide.script.trim() || !chosenVoice || (scene?.avatar && !chosenAvatar)"
+              <button v-if="studioAvailable" class="button secondary" :disabled="locked || !slide.script.trim() || !chosenVoice || (scene?.avatar && !chosenAvatar)"
                 title="生成本页开头最多 12 秒的成片" @click="act('preview', 'page')"><Film :size="16" /> 试看本页</button>
               <button class="button subtle" :disabled="locked || !readable(slide)" @click="act('scripts', 'page')"><Sparkles :size="15" /> AI 生成本页</button>
               <button class="button subtle" :disabled="locked || !missingPages" @click="act('scripts')">补齐空白页</button>

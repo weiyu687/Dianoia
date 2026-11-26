@@ -41,6 +41,7 @@
 .digital-preview { display:grid; gap:10px; min-width:0; padding:12px; background:var(--raised); }
 .digital-stage-bar { display:flex; justify-content:space-between; align-items:center; gap:8px; font-size:13px; }
 .digital-stage-bar small { color:var(--muted); }
+.digital-source-preview { display:block; width:min(100%,960px); max-height:60vh; object-fit:contain; margin:0 auto; background:#172537; border-radius:7px; }
 .digital-slide-frame { position:relative; container-type:inline-size; width:min(100%,960px); margin:0 auto; aspect-ratio:16/9;
   min-width:0; overflow:hidden; border-radius:7px; background:linear-gradient(var(--stage-top),var(--stage-bottom)); color:var(--stage-ink); }
 .digital-slide-frame::before { content:''; position:absolute; inset:0 0 auto; height:.55%; background:var(--stage-accent); }
